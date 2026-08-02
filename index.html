@@ -563,8 +563,15 @@ async function autoSummarize() {
   const toSummarize = state.messages.slice(0, total - RECENT_KEEP);
   if (toSummarize.length < 4) { state.summarising = false; return; }
   const summaryPrompt = [
-    { role: 'system', content: '你是一个对话摘要助手。请用一段简洁的话总结以下对话的核心内容和关键信息，包括用户偏好、重要事实、已讨论的话题。保留所有有用信息，不要遗漏重要细节。只输出摘要内容，不要其他说明。' },
+    {
+      role: 'system',
+      content: '你是长期剧情记忆整理助手。请把已有长期摘要与新增对话合并重写为一份新的完整摘要。保留人物身份、关系变化、承诺、冲突、重要事件、时间线、用户偏好和未解决事项；合并重复内容，删除寒暄和无关细节。不要逐段追加旧摘要，必须重新压缩成一份连贯摘要。只输出摘要正文，不要解释。摘要必须控制在约 1000 tokens 以内。'
+    },
   ];
+  if (state.summary) {
+    summaryPrompt.push({ role: 'system', content: '已有长期摘要：\n' + state.summary });
+  }
+  summaryPrompt.push({ role: 'system', content: '以下是需要并入长期记忆的新增对话：' });
   for (let i = 0; i < toSummarize.length; i++) {
     summaryPrompt.push({ role: toSummarize[i].role, content: toSummarize[i].content });
   }
@@ -820,6 +827,9 @@ function importData(file) {
       state.bgImage = s.bgImage || '';
      state.summary = s.summary || '';
       state.historyEvents = Array.isArray(s.historyEvents) ? s.historyEvents : [];
+      state.keyInfo = Array.isArray(s.keyInfo) ? s.keyInfo : [];
+      state.roles = Array.isArray(s.roles) ? s.roles : [];
+      state.currentRole = state.roles.some(function(role) { return role && role.name === s.currentRole; }) ? s.currentRole : null;
       state.currentState = s.currentState || '';
       state.userIdentity = s.userIdentity || '';
      state.messages = Array.isArray(data.messages) ? data.messages : [];
