@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
-<title>AI Chat Theater</title>
+<title>智能剧情故事</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-512.png">
+<meta name="theme-color" content="#0d0d0d">
 <style>
 /* ===== Reset & Base ===== */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -273,7 +277,7 @@ textarea{resize:none}
 <!-- Login Overlay -->
 <div id="loginOverlay">
   <div id="loginBox">
-    <h2>AI 聊天助手</h2>
+    <h2>智能剧情故事</h2>
     <p>输入角色名登录或创建新角色</p>
     <input type="text" id="charNameInput" placeholder="输入角色名称" autocomplete="off">
     <div class="login-btn-group">
@@ -289,7 +293,7 @@ textarea{resize:none}
 
 <script>
 /* ==============================================
-   AI 聊天助手 — 完整应用脚本
+   智能剧情故事 — 完整应用脚本
    ============================================== */
 
 const PRESET_COLORS = ['#C0392B','#FF6B6B','#E67E22','#F1C40F','#27AE60','#2ECC71','#00BCD4','#8E44AD'];
@@ -607,6 +611,50 @@ async function autoSummarize() {
 }
 
 /* ---- Send Message ---- */
+function parseSseDelta(line) {
+  var trimmed = line.trim();
+  if (!trimmed || !trimmed.startsWith('data:')) return '';
+  var data = trimmed.slice(5).trim();
+  if (!data || data === '[DONE]') return '';
+  try {
+    var parsed = JSON.parse(data);
+    return parsed.choices?.[0]?.delta?.content || '';
+  } catch (_) {
+    return '';
+  }
+}
+async function readSseContent(stream, onDelta) {
+  var reader = stream.getReader();
+  var decoder = new TextDecoder();
+  var buffer = '';
+  var fullContent = '';
+  while (true) {
+    var chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    var lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (var i = 0; i < lines.length; i++) {
+      var delta = parseSseDelta(lines[i]);
+      if (delta) {
+        fullContent += delta;
+        if (onDelta) onDelta(delta, fullContent);
+      }
+    }
+  }
+  buffer += decoder.decode();
+  var remainingLines = buffer.split('\n');
+  for (var j = 0; j < remainingLines.length; j++) {
+    var finalDelta = parseSseDelta(remainingLines[j]);
+    if (finalDelta) {
+      fullContent += finalDelta;
+      if (onDelta) onDelta(finalDelta, fullContent);
+    }
+  }
+  return fullContent;
+}
+
+/* ---- Send Message ---- */
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text || state.isStreaming) return;
@@ -644,41 +692,10 @@ async function sendMessage() {
       state.isStreaming = false; sendBtn.disabled = false;
       return;
     }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullContent = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (let j = 0; j < lines.length; j++) {
-        const trimmed = lines[j].trim();
-        if (!trimmed || !trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content || '';
-          if (delta) { fullContent += delta; assistantMsg.content = fullContent; updateStreamingBubble(); }
-        } catch(_) {}
-      }
-    }
-    if (buffer.trim()) {
-      const trimmed = buffer.trim();
-      if (trimmed.startsWith('data:')) {
-        const data = trimmed.slice(5).trim();
-        if (data !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(data);
-            const delta = parsed.choices?.[0]?.delta?.content || '';
-            if (delta) { fullContent += delta; assistantMsg.content = fullContent; updateStreamingBubble(); }
-          } catch(_) {}
-        }
-      }
-    }
+    const fullContent = await readSseContent(response.body, function(_delta, content) {
+      assistantMsg.content = content;
+      updateStreamingBubble();
+    });
     assistantMsg.content = fullContent;
     delete assistantMsg._streaming;
     finishStreamingBubble();
@@ -729,24 +746,10 @@ async function regenerateMessage() {
       addSystemMsg('❌ 重说失败 (' + resp.status + ')', true);
       state.isStreaming = false; sendBtn.disabled = false; return;
     }
-    var reader = resp.body.getReader();
-    var decoder = new TextDecoder();
-    var buffer = '';
-    var fullContent = '';
-    while (true) {
-      var rdd = await reader.read();
-      if (rdd.done) break;
-      buffer += decoder.decode(rdd.value, { stream: true });
-      var rawLines = buffer.split('\n');
-      buffer = rawLines.pop() || '';
-      for (var li = 0; li < rawLines.length; li++) {
-        var ln = rawLines[li].trim();
-        if (!ln || !ln.startsWith('data:')) continue;
-        var dl = ln.slice(5).trim();
-        if (dl === '[DONE]') continue;
-        try { var pr = JSON.parse(dl); var dd = pr.choices?.[0]?.delta?.content || ''; if (dd) { fullContent += dd; astMsg.content = fullContent; updateStreamingBubble(); } } catch(_) {}
-      }
-    }
+    var fullContent = await readSseContent(resp.body, function(_delta, content) {
+      astMsg.content = content;
+      updateStreamingBubble();
+    });
     astMsg.content = fullContent;
     delete astMsg._streaming;
     finishStreamingBubble();
@@ -908,48 +911,6 @@ function renderKeyInfo() {
 
 
 
-/* ---- PWA Setup ---- */
-function setupPWA() {
-  function genIcon(size) {
-    const c = document.createElement('canvas');
-    c.width = size; c.height = size;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#07c160';
-    ctx.fillRect(0, 0, size, size);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold ' + (size*0.45) + 'px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('AI', size/2, size/2 + 2);
-    return c.toDataURL();
-  }
-  const manifest = {
-    name: 'AI 聊天助手',
-    short_name: 'AI聊天',
-    description: '智能AI聊天助手',
-    start_url: location.href,
-    display: 'standalone',
-    orientation: 'portrait',
-    background_color: '#ffffff',
-    theme_color: '#07c160',
-  };
-  try {
-    manifest.icons = [
-      { src: genIcon(192), sizes: '192x192', type: 'image/png' },
-      { src: genIcon(512), sizes: '512x512', type: 'image/png', purpose: 'any' }
-    ];
-    const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
-    const link = document.createElement('link');
-    link.rel = 'manifest';
-    link.href = URL.createObjectURL(blob);
-    document.head.appendChild(link);
-  } catch(e) {}
-  const meta = document.createElement('meta');
-  meta.name = 'theme-color';
-  meta.content = '#07c160';
-  document.head.appendChild(meta);
-}
-
 /* ---- Character System ---- */
 function showLoginScreen() {
   document.getElementById('loginOverlay').style.display = 'flex';
@@ -1046,7 +1007,6 @@ if (d) d.textContent = savedChar;
   } else {
     showLoginScreen();
   }
-  setupPWA();
 }
 
 /* ---- Event Listeners ---- */
@@ -1131,6 +1091,19 @@ function backtrackMessage(idx) {
 }
 
 /* ---- Roles System ---- */
+function renameRole(index, newName) {
+  var role = state.roles[index];
+  if (!role) return;
+  var oldName = role.name;
+  var updatedName = (newName || '').trim();
+  role.name = updatedName;
+  if (state.currentRole === oldName) state.currentRole = updatedName;
+  for (var i = 0; i < state.messages.length; i++) { if (state.messages[i]._roleName === oldName) state.messages[i]._roleName = updatedName; }
+  saveCurrentCharacter();
+  renderRoles();
+  renderMessages();
+  updateIdentityBar();
+}
 function renderRoles() {
   var container = document.getElementById('rolesContainer');
   if (!container) return;
@@ -1155,7 +1128,7 @@ function renderRoles() {
     var ni = document.createElement('input');
     ni.type = "text"; ni.value = role.name || ""; ni.placeholder = "角色名";
     ni.style.cssText = 'flex:1;padding:6px 10px;border:1px solid #444;border-radius:6px;background:#1a1a1a;color:#e0e0e0;font-size:14px';
-    (function(idx){ni.addEventListener('change',function(){state.roles[idx].name=this.value.trim();saveCurrentCharacter();if(state.currentRole===state.roles[idx].name)updateBubbleColor();});})(i);
+    (function(idx){ni.addEventListener('change',function(){renameRole(idx,this.value);});})(i);
     var sb = document.createElement('button'); sb.className = 'msg-action-btn'; sb.textContent = '切换';
     sb.style.flexShrink = '0';
     (function(n){sb.addEventListener('click',function(){switchToRole(n);});})(role.name);
