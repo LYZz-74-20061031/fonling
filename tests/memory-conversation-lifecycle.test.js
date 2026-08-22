@@ -124,6 +124,22 @@ function lifecycleHarness(options = {}) {
     saveCurrentCharacter() { saveCount += 1; return options.saveResult || { ok: true, rolledBack: true }; },
     async fetch() { fetchCount += 1; return { ok: options.responseOk !== false, status: 503, body: {} }; },
     async readSseContent(_body, onChunk) { onChunk('新回答', '新回答'); return '新回答'; },
+    createModelRequestPlan(_task, requestOptions) { const tier = requestOptions && requestOptions.tier === 'air' ? 'air' : 'free'; return { task: 'chat', provider: 'glm', model: tier === 'air' ? 'glm-4.5-air' : 'test-model', tier, apiKey: 'test-key' }; },
+    async requestModel(plan, messages, onDelta) {
+      const response = await sandbox.fetch('https://example.test', { body: JSON.stringify({ messages }) });
+      if (!response.ok) throw new Error(`request failed (${response.status})`);
+      const content = await sandbox.readSseContent(response.body, typeof onDelta === 'function' ? onDelta : function() {});
+      return { content, attempts: 1, plan };
+    },
+    modelSession: {
+      snapshot() { return { armed: false, busy: false, activeTier: 'free' }; },
+      beginSend() { return { id: 'send', tier: 'free' }; },
+      beginAirRegenerate() { return { id: 'regenerate', tier: 'air' }; },
+      finish() { return true; },
+    },
+    modelSessionApi: {
+      createGenerationMetadata(plan, method) { return { provider: plan.provider, model: plan.model, tier: plan.tier, method, generatedAt: 'now' }; },
+    },
     memoryUI: { showStorageWarning(message) { warnings.push(message); } },
     memoryController: { sync() { syncCount += 1; } },
     conversationRequestEpoch: 0,

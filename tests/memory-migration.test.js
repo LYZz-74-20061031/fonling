@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const ModelConfig = require('../js/model/model-config.js');
 
 function loadStorage(overrides = {}) {
   const context = {
@@ -43,6 +44,9 @@ function loadPersistenceHarness(initialEntries = {}, storageOverride) {
   const context = {
     state,
     FonlingMemory: { Storage },
+    modelConfigApi: ModelConfig,
+    modelConfig: ModelConfig.createDefaultConfig(),
+    modelSession: { reset() {} },
     LS: { CHAR_PREFIX: 'ai_char_', CHAR_LIST: 'ai_char_list', CURRENT_CHAR: 'ai_current_char' },
     localStorage: {
       getItem(key) { return storage.has(key) ? storage.get(key) : null; },
@@ -60,11 +64,11 @@ function loadPersistenceHarness(initialEntries = {}, storageOverride) {
   };
   const declarations = html.match(/(?:var|let) loadedCharacterSettings[^;]*;/)?.[0] || '';
   const functions = [
-    'getCharDataKey', 'getCharMsgKey', 'loadCharacterData', 'saveCurrentCharacter', 'reportSaveFailure',
+    'getCharDataKey', 'getCharMsgKey', 'sanitizeCharacterSettings', 'migrateLegacyModelConfig', 'loadCharacterData', 'saveCurrentCharacter', 'reportSaveFailure',
     'storageMutationResult', 'updateCurrentCharacterSelection', 'characterMutationIsBlocked',
     'loginCharacter', 'createCharacter', 'switchCharacter', 'init',
   ].map(name => extractFunction(html, name)).join('\n');
-  vm.runInNewContext(`${declarations}\n${functions}\nthis.api = { loadCharacterData, saveCurrentCharacter, loginCharacter, createCharacter, switchCharacter, init, getSnapshot: function() { return loadedCharacterSettings; } };`, context);
+  vm.runInNewContext(`${declarations}\n${functions}\nthis.api = { loadCharacterData, saveCurrentCharacter, loginCharacter, createCharacter, switchCharacter, init, getSnapshot: function() { return loadedCharacterSettings; }, getModelConfig: function() { return modelConfig; } };`, context);
   return { context, state, storage, writes, api: context.api };
 }
 
@@ -387,7 +391,8 @@ test('load migration executes one data write and preserves unknown nested settin
   const saved = JSON.parse(dataWrites[0].value);
   const savedMessages = JSON.parse(messageWrites[0].value);
   assert.deepEqual(saved.customSetting, oldSettings.customSetting);
-  assert.equal(saved.apiKey, oldSettings.apiKey);
+  assert.equal(Object.prototype.hasOwnProperty.call(saved, 'apiKey'), false);
+  assert.equal(harness.api.getModelConfig().deepseekApiKey, oldSettings.apiKey);
   assert.deepEqual(saved.roles, oldSettings.roles);
   assert.equal(saved.memorySchemaVersion, 2);
   assert.deepEqual(saved.memories.map(memory => memory.content), ['Met at the harbor', 'Gate opens at dawn']);

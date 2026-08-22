@@ -2,11 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const ModelConfig = require('../js/model/model-config.js');
 
 function loadImportData() {
   const html = fs.readFileSync('index.html', 'utf8');
   const normalize = html.match(/function normalizeImportedCharacter\(data\) \{[\s\S]*?\n\}/)?.[0];
   const fn = html.match(/function importData\(file\) \{[\s\S]*?\n\}/)?.[0];
+  const sanitize = html.match(/function sanitizeCharacterSettings\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
+  const migrateModel = html.match(/function migrateLegacyModelConfig\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(normalize, 'normalizeImportedCharacter must exist in index.html');
   assert.ok(fn, 'importData must exist in index.html');
 
@@ -37,6 +40,8 @@ function loadImportData() {
 
   const context = {
     state,
+    modelConfigApi: ModelConfig,
+    modelConfig: ModelConfig.createDefaultConfig(),
     loadedCharacterSettings: {},
     JSON,
     FileReader: FakeFileReader,
@@ -62,7 +67,7 @@ function loadImportData() {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('js/memory/memory-model.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/memory/memory-storage.js', 'utf8'), context);
-  vm.runInContext(`${normalize}; ${fn}; this.importData = importData;`, context);
+  vm.runInContext(`${sanitize}; ${migrateModel}; ${normalize}; ${fn}; this.importData = importData;`, context);
   return context;
 }
 

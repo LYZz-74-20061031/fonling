@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-512.png">
 <meta name="theme-color" content="#0d0d0d">
 <link rel="stylesheet" href="css/memory.css">
+<link rel="stylesheet" href="css/model.css">
 <style>
 /* ===== Reset & Base ===== */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -184,8 +185,14 @@ textarea{resize:none}
   </header>
 
   <main id="chatArea"></main>
-  <div id="identityBar"></div>
   <div id="memoryPromptBar" role="button" tabindex="0" aria-live="polite" hidden><span id="memoryPromptText"></span></div>
+  <div id="modelStatusBar">
+    <button id="airModeBtn" type="button" aria-pressed="false">深度思考（付费模型）</button>
+    <div id="identityBar" aria-label="当前身份">
+      <span id="identityDot" aria-hidden="true"></span>
+      <span id="identityName">主控</span>
+    </div>
+  </div>
   <footer id="inputBar">
     <textarea id="messageInput" rows="1" placeholder="输入消息…" enterkeyhint="send"></textarea>
     <button id="sendBtn" aria-label="发送">➤</button>
@@ -200,6 +207,49 @@ textarea{resize:none}
       <button id="closeSettingsBtn" aria-label="关闭">✕</button>
     </div>
     <div class="settings-body">
+      <section class="model-settings-card" aria-labelledby="modelSettingsTitle">
+        <h3 id="modelSettingsTitle">模型服务（全局）</h3>
+        <p class="model-settings-scope">对所有智能体生效，不随角色 JSON 导入或导出。</p>
+
+        <span class="label">GLM API Key</span>
+        <span class="desc">普通剧情、自动摘要和记忆分析默认使用 GLM-4.7-Flash。</span>
+        <div class="model-key-row">
+          <input type="password" id="glmApiKeyInput" placeholder="填写智谱 API Key" autocomplete="off">
+          <button type="button" id="toggleGlmKeyBtn" class="model-key-toggle" aria-label="显示 GLM API Key">显示</button>
+        </div>
+        <div class="model-test-row">
+          <button type="button" id="testGlmBtn" class="model-test-btn">测试免费模型</button>
+          <span id="glmConnectionStatus" class="model-connection-status" role="status">未测试</span>
+        </div>
+
+        <div class="model-readonly-grid" aria-label="GLM 模型分工">
+          <div><span>默认免费模型</span><strong>GLM-4.7-Flash</strong></div>
+          <div><span>单次高质量模型</span><strong>GLM-4.5-Air</strong></div>
+        </div>
+        <p class="model-cost-note">Air 只会在你主动选择“深度思考”或“重新深度思考”时调用。</p>
+
+        <label class="label" for="defaultProviderSelect">默认剧情模型</label>
+        <select id="defaultProviderSelect">
+          <option value="glm">GLM-4.7-Flash（免费，推荐）</option>
+          <option value="deepseek">DeepSeek（可能产生费用）</option>
+        </select>
+
+        <details id="deepseekBackupSettings">
+          <summary>备用模型设置 · DeepSeek</summary>
+          <p class="desc">仅在你手动选择为默认剧情模型时使用，不会自动调用。</p>
+          <span class="label">DeepSeek API Key</span>
+          <div class="model-key-row">
+            <input type="password" id="deepseekApiKeyInput" placeholder="sk-..." autocomplete="off">
+            <button type="button" id="toggleDeepseekKeyBtn" class="model-key-toggle" aria-label="显示 DeepSeek API Key">显示</button>
+          </div>
+          <div class="model-test-row">
+            <button type="button" id="testDeepseekBtn" class="model-test-btn">测试备用模型</button>
+            <span id="deepseekConnectionStatus" class="model-connection-status" role="status">未测试</span>
+          </div>
+        </details>
+      </section>
+
+      <hr>
       <span class="label">当前角色</span>
       <span id="currentCharDisplay" style="color:var(--primary);font-size:15px;font-weight:500">未登录</span>
       <div class="spacer"></div>
@@ -208,10 +258,6 @@ textarea{resize:none}
       <button class="btn-block btn-danger" id="deleteCharBtn">删除此角色</button>
       <hr>
  
-      <span class="label">DeepSeek API Key</span>
-      <span class="desc">填入你的 DeepSeek API 密钥，格式如 sk-xxxxxxxx</span>
-      <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off">
-
       <span class="label">AI 人设与世界观</span>
       <span class="desc">在这里写入你想让 AI 扮演的角色和世界设定，实时生效</span>
       <textarea id="systemPromptInput" rows="5" placeholder="例如：你是修仙界的师姐，说话带古风，语气温柔但偶尔毒舌…"></textarea>
@@ -340,6 +386,9 @@ textarea{resize:none}
   </section>
 </div>
 
+<script src="js/model/model-config.js"></script>
+<script src="js/model/model-gateway.js"></script>
+<script src="js/model/model-session.js"></script>
 <script src="js/memory/memory-model.js"></script>
 <script src="js/memory/memory-storage.js"></script>
 <script src="js/memory/memory-context.js"></script>
@@ -352,8 +401,6 @@ textarea{resize:none}
    ============================================== */
 
 const PRESET_COLORS = ['#C0392B','#FF6B6B','#E67E22','#F1C40F','#27AE60','#2ECC71','#00BCD4','#8E44AD'];
-const DEEPSEEK_API = 'https://api.deepseek.com/chat/completions';
-const MODEL = 'deepseek-v4-flash';
 const MAX_MSG_BEFORE_SUMMARY = 30;
 const RECENT_KEEP = 14;
 
@@ -363,8 +410,53 @@ const LS = {
   CURRENT_CHAR: 'ai_current_char',
 };
 
+const modelNamespace = typeof globalThis.FonlingModels === 'object' && globalThis.FonlingModels ? globalThis.FonlingModels : {};
+const modelConfigApi = modelNamespace.Config || {
+  createDefaultConfig: function() { return { version: 1, defaultProvider: 'glm', glmApiKey: '', deepseekApiKey: '', costPolicy: { airRequiresExplicitAction: true, freeRetryLimit: 1, automaticTasksUseFreeGlm: true }, connectionTests: { glm: { status: 'untested', checkedAt: '', message: '' }, deepseek: { status: 'untested', checkedAt: '', message: '' } } }; },
+  normalizeConfig: function(value) { return Object.assign(this.createDefaultConfig(), value && typeof value === 'object' ? value : {}); },
+  loadConfig: function() { return this.createDefaultConfig(); },
+  saveConfig: function(_storage, value) { return { ok: false, config: this.normalizeConfig(value), error: new Error('模型配置模块不可用'), rollbackError: null }; },
+  migrateLegacyDeepSeekKey: function(_storage, value) { return { ok: false, migrated: false, config: this.normalizeConfig(value), error: new Error('模型配置模块不可用'), rollbackError: null }; }
+};
+const modelGateway = modelNamespace.Gateway || null;
+const modelSessionApi = modelNamespace.Session || {
+  createSession: function() {
+    var armed = false; var active = null; var sequence = 0;
+    return {
+      snapshot: function() { return { armed: armed, busy: Boolean(active), activeTier: active ? active.tier : 'free' }; },
+      armAir: function() { if (active) return false; armed = !armed; return true; },
+      cancelPending: function() { if (active) return false; armed = false; return true; },
+      beginSend: function() { if (active) return null; active = { id: 'fallback-' + (++sequence), tier: armed ? 'air' : 'free', method: 'send' }; armed = false; return active; },
+      beginAirRegenerate: function() { if (active) return null; active = { id: 'fallback-' + (++sequence), tier: 'air', method: 'regenerate' }; armed = false; return active; },
+      finish: function(token) { if (!active || !token || token.id !== active.id) return false; active = null; armed = false; return true; },
+      reset: function() { active = null; armed = false; }
+    };
+  },
+  createGenerationMetadata: function(plan, method) { return { provider: plan.provider || '', model: plan.model || '', tier: plan.tier || 'free', method: method, generatedAt: new Date().toISOString() }; },
+  isAirGeneration: function(value) { return Boolean(value && value.tier === 'air'); }
+};
+const modelSession = modelSessionApi.createSession(function() {
+  if (typeof updateModelStatusBar === 'function') updateModelStatusBar();
+});
+let modelConfig = modelConfigApi.loadConfig(localStorage);
+
+function createModelRequestPlan(task, options) {
+  if (!modelGateway || typeof modelGateway.createPlan !== 'function') throw new Error('模型请求模块不可用');
+  return modelGateway.createPlan(Object.assign({}, options || {}, { task: task, config: modelConfig }));
+}
+
+async function requestModel(plan, messages, onDelta, signal) {
+  if (!modelGateway || typeof modelGateway.request !== 'function') throw new Error('模型请求模块不可用');
+  return modelGateway.request({
+    plan: plan,
+    messages: messages,
+    onDelta: onDelta,
+    signal: signal,
+    fetchImpl: fetch
+  });
+}
+
 let state = {
-   apiKey: '',
    systemPrompt: '',
    style: '',
    bgImage: '',
@@ -396,7 +488,12 @@ const $ = id => document.getElementById(id);
  const messageInput = $('messageInput');
  const sendBtn = $('sendBtn');
  const settingsOverlay = $('settingsOverlay');
- const apiKeyInput = $('apiKeyInput');
+ const glmApiKeyInput = $('glmApiKeyInput');
+ const deepseekApiKeyInput = $('deepseekApiKeyInput');
+ const defaultProviderSelect = $('defaultProviderSelect');
+ const testGlmBtn = $('testGlmBtn');
+ const testDeepseekBtn = $('testDeepseekBtn');
+ const airModeBtn = $('airModeBtn');
  const systemPromptInput = $('systemPromptInput');
  const styleInput = $('styleInput');
  const bgFileInput = $('bgFileInput');
@@ -507,8 +604,13 @@ if (memoryFeatureAvailable) {
       getCharacterName: function() { return state.currentCharacter; },
       loadCharacterSnapshot: loadCharacterSnapshotForAnalysis,
       saveCharacterSnapshot: saveCharacterSnapshotForAnalysis,
-      getAnalysisConfig: function(snapshot) {
-        return { apiUrl: DEEPSEEK_API, apiKey: snapshot.apiKey, model: MODEL, fetchImpl: fetch };
+      getAnalysisConfig: function() {
+        var analysisPlan = createModelRequestPlan('analysis');
+        return {
+          requestImpl: function(request) {
+            return requestModel(analysisPlan, request.messages, null, request.signal);
+          }
+        };
       },
       ui: memoryUI,
       now: function() { return new Date().toISOString(); }
@@ -591,6 +693,23 @@ function characterMutationIsBlocked() {
   return true;
 }
 var loadedCharacterSettings = {};
+function sanitizeCharacterSettings(settings, keepLegacyApiKey) {
+  var clean = JSON.parse(JSON.stringify(settings && typeof settings === 'object' ? settings : {}));
+  if (!keepLegacyApiKey) delete clean.apiKey;
+  delete clean.glmApiKey;
+  delete clean.deepseekApiKey;
+  delete clean.defaultProvider;
+  delete clean.costPolicy;
+  delete clean.modelConfig;
+  return clean;
+}
+
+function migrateLegacyModelConfig(legacyKey) {
+  var result = modelConfigApi.migrateLegacyDeepSeekKey(localStorage, modelConfig, legacyKey);
+  if (result && result.ok === true) modelConfig = result.config;
+  return result;
+}
+
 function loadCharacterData(charName) {
   if (!charName) return false;
   try {
@@ -599,10 +718,12 @@ function loadCharacterData(charName) {
     var migrated = FonlingMemory.Storage.migrateCharacterData(d, loadedMessages);
     if (migrated.supported === false) return false;
     d = migrated.settings;
+    var legacyKeyMigration = migrateLegacyModelConfig(d.apiKey);
+    var keepLegacyApiKey = Boolean(d.apiKey && (!legacyKeyMigration || legacyKeyMigration.ok !== true));
+    d = sanitizeCharacterSettings(d, keepLegacyApiKey);
     var loadedState = {
       currentCharacter: charName,
       messages: migrated.messages,
-      apiKey: d.apiKey || '',
       systemPrompt: d.systemPrompt || '',
       style: d.style || '',
       userIdentity: d.userIdentity || '',
@@ -624,6 +745,7 @@ function loadCharacterData(charName) {
     backgroundOperationEpoch += 1;
     characterSelectionEpoch += 1;
     loadedState.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
+    delete state.apiKey;
     Object.assign(state, loadedState);
     loadedCharacterSettings = JSON.parse(JSON.stringify(d));
     if (migrated.changed) {
@@ -634,6 +756,7 @@ function loadCharacterData(charName) {
       });
     }
     if (typeof memoryController !== 'undefined') memoryController.sync();
+    modelSession.reset();
     return true;
   } catch(e) { return false; }
 }
@@ -657,11 +780,12 @@ function saveCurrentCharacter() {
     previousDataRaw = localStorage.getItem(dataKey);
     previousMessagesRaw = localStorage.getItem(messageKey);
     var settingsToSave = Object.assign({}, loadedCharacterSettings, {
-      apiKey: state.apiKey, systemPrompt: state.systemPrompt, style: state.style,
+      systemPrompt: state.systemPrompt, style: state.style,
       userIdentity: state.userIdentity, bgImage: state.bgImage,
       roles: state.roles, currentRole: state.currentRole,
       summary: state.summary
     }, FonlingMemory.Storage.serializeMemoryState(state));
+    settingsToSave = sanitizeCharacterSettings(settingsToSave, Boolean(settingsToSave.apiKey && !modelConfig.deepseekApiKey));
     localStorage.setItem(dataKey, JSON.stringify(settingsToSave));
     localStorage.setItem(messageKey, JSON.stringify(state.messages));
     loadedCharacterSettings = JSON.parse(JSON.stringify(settingsToSave));
@@ -739,7 +863,6 @@ function saveCharacterSnapshotForAnalysis(charName, snapshot) {
     previousMessagesRaw = localStorage.getItem(messageKey);
     var existingSettings = JSON.parse(previousDataRaw || '{}');
     var settingsToSave = Object.assign({}, existingSettings, {
-      apiKey: snapshot.apiKey || '',
       systemPrompt: snapshot.systemPrompt || '',
       style: snapshot.style || '',
       userIdentity: snapshot.userIdentity || '',
@@ -748,6 +871,7 @@ function saveCharacterSnapshotForAnalysis(charName, snapshot) {
       currentRole: snapshot.currentRole || null,
       summary: snapshot.summary || ''
     }, FonlingMemory.Storage.serializeMemoryState(snapshot));
+    settingsToSave = sanitizeCharacterSettings(settingsToSave, Boolean(settingsToSave.apiKey && !modelConfig.deepseekApiKey));
     localStorage.setItem(dataKey, JSON.stringify(settingsToSave));
     localStorage.setItem(messageKey, JSON.stringify(Array.isArray(snapshot.messages) ? snapshot.messages : []));
     if (state.currentCharacter === charName) {
@@ -812,6 +936,14 @@ function renderMessages(scrollToBottom_) {
     }
     bubble.innerHTML = formatMsgText(msg.content || '');
     wrap.appendChild(bubble);
+    if (msg.role === 'assistant' && modelSessionApi.isAirGeneration(msg.generation)) {
+      var tierBadge = document.createElement('button');
+      tierBadge.type = 'button';
+      tierBadge.className = 'model-tier-badge';
+      tierBadge.textContent = 'Air';
+      tierBadge.title = 'GLM 高质量模型 · ' + (msg.generation.model || 'glm-4.5-air') + ' · ' + (msg.generation.method === 'regenerate' ? '重新深度思考' : '单次深度思考');
+      wrap.appendChild(tierBadge);
+    }
     // Action buttons for AI messages
     if (msg.role === 'assistant' && !msg._streaming) {
       var _a = document.createElement('div'); _a.className = 'msg-actions';
@@ -824,7 +956,7 @@ function renderMessages(scrollToBottom_) {
       // edit + regen + backtrack for latest AI message
       if (i === state.messages.length - 1) {
         var _e = document.createElement('button'); _e.className = 'msg-action-btn'; _e.textContent = '编辑';
-        var _r = document.createElement('button'); _r.className = 'msg-action-btn'; _r.textContent = '重说';
+        var _r = document.createElement('button'); _r.className = 'msg-action-btn'; _r.textContent = '重新深度思考';
         var _b = document.createElement('button'); _b.className = 'msg-action-btn'; _b.textContent = '回溯';
         _e.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();startEdit(idx);};}(i));
         _r.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage();});
@@ -991,16 +1123,9 @@ async function autoSummarize() {
   chatArea.appendChild(noteWrap);
   scrollToBottom();
   try {
-    const res = await fetch(DEEPSEEK_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.apiKey },
-      body: JSON.stringify({ model: MODEL, messages: summaryPrompt, stream: false, max_tokens: 1024 }),
-    });
+    const summaryResult = await requestModel(createModelRequestPlan('summary'), summaryPrompt);
     if (!summaryRequestIsCurrent()) { noteWrap.remove(); return; }
-    if (!res.ok) { noteWrap.remove(); state.summarising = false; return; }
-    const data = await res.json();
-    if (!summaryRequestIsCurrent()) { noteWrap.remove(); return; }
-    const summary = data.choices?.[0]?.message?.content?.trim();
+    const summary = typeof summaryResult.content === 'string' ? summaryResult.content.trim() : '';
     if (summary) {
       var liveMessageIds = new Set(state.messages.map(function(message) { return message && message.id; }).filter(Boolean));
       if (state.summary !== baseSummary || summarizedMessageIds.some(function(id) { return !liveMessageIds.has(id); })) {
@@ -1106,6 +1231,7 @@ function finishConversationRequest(request, focusInput) {
   state.isStreaming = false;
   sendBtn.disabled = false;
   conversationRequestEpoch += 1;
+  if (typeof updateModelStatusBar === 'function') updateModelStatusBar();
   if (focusInput && messageInput && typeof messageInput.focus === 'function') messageInput.focus();
   return true;
 }
@@ -1177,23 +1303,34 @@ function persistFailedSend(previousConversationState, errorMessage, request) {
 }
 
 /* ---- Send Message ---- */
-async function sendMessage() {
-  const text = messageInput.value.trim();
+async function sendMessage(options) {
+  var sendOptions = options && typeof options === 'object' ? options : {};
+  var reusedUserMsg = sendOptions.reuseLastUser === true && state.messages.length > 0
+    && state.messages[state.messages.length - 1].role === 'user'
+    ? state.messages[state.messages.length - 1]
+    : null;
+  const text = (reusedUserMsg ? (sendOptions.userText || reusedUserMsg.content) : messageInput.value).trim();
   if (!text || state.isStreaming) return;
-  if (!state.apiKey) {
-    addSystemMsg('请先点击右上角 ⚙️ 设置你的 DeepSeek API Key');
+  var isNarration = text.startsWith('/');
+  var finalText = isNarration ? text.slice(1).trim() : text;
+  if (isNarration && !finalText) return;
+  var generationPlan;
+  var pendingTier = modelSession.snapshot().armed ? 'air' : undefined;
+  try { generationPlan = createModelRequestPlan('chat', { tier: pendingTier }); }
+  catch (planError) { addSystemMsg('❌ ' + (planError.message || '模型请求模块不可用'), true); return; }
+  if (!generationPlan.apiKey) {
+    addSystemMsg('请先点击右上角 ⚙️ 配置 ' + (generationPlan.provider === 'glm' ? 'GLM' : 'DeepSeek') + ' API Key');
     return;
   }
-  messageInput.value = '';
-  messageInput.style.height = 'auto';
+  if (!reusedUserMsg) {
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+  }
   sendBtn.disabled = true;
   state.isStreaming = true;
   var request = beginConversationRequest();
-  var isNarration = text.startsWith('/');
-  var finalText = isNarration ? text.slice(1).trim() : text;
-  if (isNarration && !finalText) { finishConversationRequest(request); return; }
   var previousConversationState = captureConversationState();
-  var userMsg = {
+  var userMsg = reusedUserMsg || {
     id: FonlingMemory.Model.createId('message'),
     role: 'user',
     content: finalText,
@@ -1206,7 +1343,9 @@ async function sendMessage() {
     content: '',
     _streaming: true
   };
-  state.messages = state.messages.concat(userMsg, assistantMsg);
+  state.messages = reusedUserMsg
+    ? state.messages.concat(assistantMsg)
+    : state.messages.concat(userMsg, assistantMsg);
   FonlingMemory.Model.ensureMessageIds(state.messages);
   renderMessages();
   var apiBuild;
@@ -1220,33 +1359,30 @@ async function sendMessage() {
     finishConversationRequest(request);
     return;
   }
+  var modelOperation = modelSession.beginSend();
+  if (!modelOperation) {
+    applyConversationState(previousConversationState);
+    renderMessages();
+    finishConversationRequest(request);
+    return;
+  }
+  generationPlan = createModelRequestPlan('chat', { tier: modelOperation.tier === 'air' ? 'air' : undefined });
   try {
-    const response = await fetch(DEEPSEEK_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.apiKey },
-      body: JSON.stringify({ model: MODEL, messages: apiBuild.messages, stream: true, max_tokens: 4096 }),
-    });
-    if (!conversationRequestIsCurrent(request)) return;
-    if (!response.ok) {
-      let errMsg = '请求失败 (' + response.status + ')';
-      try { const errBody = await response.json(); errMsg = errBody.error?.message || errMsg; } catch(_) {}
-      if (!conversationRequestIsCurrent(request)) return;
-      persistFailedSend(previousConversationState, '❌ ' + errMsg, request);
-      finishConversationRequest(request);
-      return;
-    }
-    const fullContent = await readSseContent(response.body, function(_delta, content) {
+    const modelResult = await requestModel(generationPlan, apiBuild.messages, function(_delta, content) {
       if (!conversationRequestIsCurrent(request)) return;
       assistantMsg.content = content;
       updateStreamingBubble();
     });
+    const fullContent = modelResult.content;
     if (!conversationRequestIsCurrent(request)) return;
     if (typeof fullContent !== 'string' || !fullContent.trim()) {
       persistFailedSend(previousConversationState, '❌ 未收到有效回复，请重试', request);
+      if (typeof showFailedSendActions === 'function') showFailedSendActions();
       finishConversationRequest(request);
       return;
     }
     assistantMsg.content = fullContent;
+    assistantMsg.generation = modelSessionApi.createGenerationMetadata(generationPlan, 'send');
     delete assistantMsg._streaming;
     finishStreamingBubble();
     state.memoryRequestTraces = recordMemoryRequestTrace(
@@ -1276,9 +1412,12 @@ async function sendMessage() {
     }
   } catch (e) {
     if (!conversationRequestIsCurrent(request)) return;
-    persistFailedSend(previousConversationState, '❌ 网络错误：' + (e.message || '请检查网络连接'), request);
+    persistFailedSend(previousConversationState, '❌ 模型请求失败：' + (e.message || '请检查网络连接'), request);
+    if (typeof showFailedSendActions === 'function') showFailedSendActions();
     finishConversationRequest(request, true);
     return;
+  } finally {
+    modelSession.finish(modelOperation);
   }
   try {
     renderMessages();
@@ -1309,64 +1448,54 @@ async function regenerateMessage() {
     if (state.messages[uj].role === 'user') { usrIdx = uj; break; }
   }
   if (usrIdx === -1) return;
+  var regenerationPlan;
+  try { regenerationPlan = createModelRequestPlan('chat', { tier: 'air' }); }
+  catch (planError) { addSystemMsg('❌ ' + (planError.message || '模型请求模块不可用'), true); return; }
+  if (!regenerationPlan.apiKey) {
+    addSystemMsg('请先点击右上角 ⚙️ 配置 GLM API Key');
+    return;
+  }
   if (typeof memoryController !== 'undefined' && typeof memoryController.invalidateAnalysis === 'function') {
     memoryController.invalidateAnalysis(state.currentCharacter);
   }
   var previousConversationState = captureConversationState();
   var retainedMessages = state.messages.slice(0, aiIdx);
-  applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
-  renderMessages();
-  state.isStreaming = true;
-  sendBtn.disabled = true;
-  var request = beginConversationRequest();
-  var astMsg = { id: FonlingMemory.Model.createId('message'), role: 'assistant', content: '', _streaming: true };
-  state.messages.push(astMsg);
-  FonlingMemory.Model.ensureMessageIds(state.messages);
-  renderMessages();
-  var regenerateUserText = state.messages[usrIdx] && state.messages[usrIdx].role === 'user'
-    ? state.messages[usrIdx].content
+  var regenerateUserText = previousConversationState.messages[usrIdx] && previousConversationState.messages[usrIdx].role === 'user'
+    ? previousConversationState.messages[usrIdx].content
     : '';
+  applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
   var apiBuild;
   try {
     apiBuild = buildApiMessages({ userText: regenerateUserText });
   } catch (contextError) {
-    if (!conversationRequestIsCurrent(request)) return;
     applyConversationState(previousConversationState);
-    renderMessages();
     addSystemMsg('⚠️ 记忆上下文无法构建：' + (contextError.code || contextError.message || '未知错误'), true);
+    return;
+  }
+  applyConversationState(previousConversationState);
+  state.isStreaming = true;
+  sendBtn.disabled = true;
+  var request = beginConversationRequest();
+  var modelOperation = modelSession.beginAirRegenerate();
+  if (!modelOperation) {
     finishConversationRequest(request);
     return;
   }
+  var astMsg = { id: FonlingMemory.Model.createId('message'), role: 'assistant', content: '' };
   try {
-    var resp = await fetch(DEEPSEEK_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.apiKey },
-      body: JSON.stringify({ model: MODEL, messages: apiBuild.messages, stream: true, max_tokens: 4096 }),
-    });
-    if (!conversationRequestIsCurrent(request)) return;
-    if (!resp.ok) {
-      applyConversationState(previousConversationState);
-      renderMessages();
-      addSystemMsg('❌ 重说失败 (' + resp.status + ')', true);
-      finishConversationRequest(request); return;
-    }
-    var fullContent = await readSseContent(resp.body, function(_delta, content) {
-      if (!conversationRequestIsCurrent(request)) return;
-      astMsg.content = content;
-      updateStreamingBubble();
-    });
+    var regenerationResult = await requestModel(regenerationPlan, apiBuild.messages);
+    var fullContent = regenerationResult.content;
     if (!conversationRequestIsCurrent(request)) return;
     if (typeof fullContent !== 'string' || !fullContent.trim()) {
-      applyConversationState(previousConversationState);
-      renderMessages();
-      addSystemMsg('❌ 重说失败：未收到有效回复', true);
-      if (typeof memoryController !== 'undefined') memoryController.sync();
+      addSystemMsg('❌ 重新深度思考失败：未收到有效回复', true);
       finishConversationRequest(request);
       return;
     }
     astMsg.content = fullContent;
-    delete astMsg._streaming;
-    finishStreamingBubble();
+    astMsg.generation = modelSessionApi.createGenerationMetadata(regenerationPlan, 'regenerate');
+    var nextConversationState = conversationStateForMessages(retainedMessages.concat(astMsg), previousConversationState.summary);
+    applyConversationState(nextConversationState);
+    FonlingMemory.Model.ensureMessageIds(state.messages);
     state.memoryRequestTraces = recordMemoryRequestTrace(
       state.memoryRequestTraces,
       astMsg.id,
@@ -1379,8 +1508,8 @@ async function regenerateMessage() {
       applyConversationState(previousConversationState);
       renderMessages();
       reportSaveFailure(regenerateSaveResult, {
-        restored: '重说保存失败，原回答已恢复。',
-        partial: '重说保存失败，本地存储可能不完整，请立即导出备份。'
+        restored: '重新深度思考保存失败，原回答已保留。',
+        partial: '重新深度思考保存失败，本地存储可能不完整，请立即导出备份。'
       });
       if (typeof memoryController !== 'undefined') memoryController.sync();
       finishConversationRequest(request); return;
@@ -1388,17 +1517,17 @@ async function regenerateMessage() {
     if (typeof memoryController !== 'undefined' && typeof memoryController.considerTurn === 'function') {
       memoryController.considerTurn({
         characterName: state.currentCharacter,
-        userMessageId: state.messages[usrIdx].id,
+        userMessageId: previousConversationState.messages[usrIdx].id,
         assistantMessageId: astMsg.id
       });
     }
   } catch(e) {
     if (!conversationRequestIsCurrent(request)) return;
-    applyConversationState(previousConversationState);
-    renderMessages();
-    addSystemMsg('❌ 网络错误：' + (e.message || '请检查网络连接'), true);
+    addSystemMsg('❌ 重新深度思考失败：' + (e.message || '请检查网络连接'), true);
     finishConversationRequest(request);
     return;
+  } finally {
+    modelSession.finish(modelOperation);
   }
   try {
     renderMessages();
@@ -1432,6 +1561,36 @@ function addSystemMsg(text, isError) {
   scrollToBottom();
 }
 
+function retryLastFailedMessage(useAir) {
+  if (state.isStreaming) return false;
+  var userMessage = state.messages[state.messages.length - 1];
+  if (!userMessage || userMessage.role !== 'user' || typeof userMessage.content !== 'string') return false;
+  modelSession.cancelPending();
+  if (useAir) modelSession.armAir();
+  updateModelStatusBar();
+  sendMessage({ reuseLastUser: true, userText: userMessage.content });
+  return true;
+}
+
+function showFailedSendActions() {
+  var userMessage = state.messages[state.messages.length - 1];
+  if (!userMessage || userMessage.role !== 'user') return;
+  var actions = document.createElement('div');
+  actions.className = 'model-failure-actions';
+  var freeButton = document.createElement('button');
+  freeButton.type = 'button';
+  freeButton.textContent = '再次免费尝试';
+  freeButton.addEventListener('click', function() { actions.remove(); retryLastFailedMessage(false); });
+  var airButton = document.createElement('button');
+  airButton.type = 'button';
+  airButton.textContent = '深度思考本条';
+  airButton.addEventListener('click', function() { actions.remove(); retryLastFailedMessage(true); });
+  actions.appendChild(freeButton);
+  actions.appendChild(airButton);
+  chatArea.appendChild(actions);
+  scrollToBottom();
+}
+
 function notifyMemoryUnavailableOnce() {
   if (memoryFeatureAvailable || memoryUnavailableNoticeShown || !state.currentCharacter) return;
   memoryUnavailableNoticeShown = true;
@@ -1449,7 +1608,6 @@ function buildExportData(sourceState, now) {
     exportedAt = exportDate.toISOString();
   }
   var settings = {
-    apiKey: sourceState.apiKey,
     systemPrompt: sourceState.systemPrompt,
     style: sourceState.style,
     bgImage: sourceState.bgImage,
@@ -1459,6 +1617,7 @@ function buildExportData(sourceState, now) {
     userIdentity: sourceState.userIdentity
   };
   Object.assign(settings, FonlingMemory.Storage.serializeMemoryState(sourceState));
+  settings = sanitizeCharacterSettings(settings, false);
   return JSON.parse(JSON.stringify({
     schemaVersion: 2,
     export_version: 2,
@@ -1511,10 +1670,11 @@ function importData(file) {
     try {
       const data = JSON.parse(e.target.result);
       const imported = normalizeImportedCharacter(data);
-      const s = imported.settings;
+      const rawSettings = imported.settings;
+      const importedLegacyKey = rawSettings.apiKey || '';
+      const s = sanitizeCharacterSettings(rawSettings, false);
       const importedRoles = Array.isArray(s.roles) ? s.roles : [];
       const importedState = {
-        apiKey: s.apiKey || '',
         systemPrompt: s.systemPrompt || '',
         style: s.style || '',
         bgImage: s.bgImage || '',
@@ -1539,6 +1699,7 @@ function importData(file) {
       summaryRequestEpoch += 1;
       backgroundOperationEpoch += 1;
       characterSelectionEpoch += 1;
+      delete state.apiKey;
       Object.assign(state, importedState);
       var saveResult = saveCurrentCharacter();
       if (!saveResult.ok) {
@@ -1551,6 +1712,11 @@ function importData(file) {
         });
         return;
       }
+      var legacyImportMigration = migrateLegacyModelConfig(importedLegacyKey);
+      if (legacyImportMigration && legacyImportMigration.ok !== true) {
+        addSystemMsg('⚠️ 角色已导入，但旧版 DeepSeek Key 未能迁移到全局设置，请手动重新填写', true);
+      }
+      modelSession.reset();
       try {
         syncSettingsUI();
         updateIdentityBar();
@@ -1572,12 +1738,44 @@ function importData(file) {
 
 /* ---- Sync UI with state ---- */
 function syncSettingsUI() {
-  apiKeyInput.value = state.apiKey;
+  glmApiKeyInput.value = modelConfig.glmApiKey;
+  deepseekApiKeyInput.value = modelConfig.deepseekApiKey;
+  defaultProviderSelect.value = modelConfig.defaultProvider;
+  renderConnectionStatus('glm');
+  renderConnectionStatus('deepseek');
   systemPromptInput.value = state.systemPrompt;
   styleInput.value = state.style;
   userIdentityInput.value = state.userIdentity;
   renderRoles();
   if (typeof memoryController !== 'undefined') memoryController.sync();
+}
+
+function connectionStatusText(status) {
+  return {
+    untested: '未测试', testing: '正在测试…', success: '连接成功', invalid_key: 'Key 无效',
+    rate_limited: '请求受限', unavailable: '服务暂不可用', error: '连接失败'
+  }[status] || '未测试';
+}
+
+function renderConnectionStatus(provider) {
+  var node = provider === 'deepseek' ? $('deepseekConnectionStatus') : $('glmConnectionStatus');
+  if (!node) return;
+  var record = modelConfig.connectionTests && modelConfig.connectionTests[provider]
+    ? modelConfig.connectionTests[provider]
+    : { status: 'untested', checkedAt: '', message: '' };
+  node.dataset.status = record.status || 'untested';
+  node.textContent = connectionStatusText(record.status);
+  node.title = record.message || record.checkedAt || '';
+}
+
+function updateModelStatusBar() {
+  if (!airModeBtn) return;
+  var snapshot = modelSession.snapshot();
+  airModeBtn.disabled = snapshot.busy || state.isStreaming;
+  airModeBtn.setAttribute('aria-pressed', snapshot.armed ? 'true' : 'false');
+  airModeBtn.textContent = snapshot.armed
+    ? '深度思考 · 付费 · 仅本条'
+    : (snapshot.busy && snapshot.activeTier === 'air' ? 'Air 生成中…' : '深度思考（付费模型）');
 }
 
 
@@ -1625,6 +1823,7 @@ function loginCharacter(name) {
     });
     return;
   }
+  modelSession.reset();
   hideLoginScreen();
   syncSettingsUI();
   if (typeof memoryController !== 'undefined') memoryController.sync();
@@ -1656,7 +1855,8 @@ function createCharacter(name) {
   }
   state.currentCharacter = t;
   loadedCharacterSettings = {};
-  state.apiKey = ''; state.systemPrompt = ''; state.style = ''; state.userIdentity = '';
+  delete state.apiKey;
+  state.systemPrompt = ''; state.style = ''; state.userIdentity = '';
   state.bgImage = ''; state.roles = []; state.currentRole = null; state.summary = ''; state.messages = [];
   Object.assign(state, FonlingMemory.Storage.createEmptyMemoryState());
   state.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
@@ -1696,6 +1896,7 @@ function createCharacter(name) {
     });
     return;
   }
+  modelSession.reset();
   hideLoginScreen();
   syncSettingsUI();
   if (typeof memoryController !== 'undefined') memoryController.sync();
@@ -1726,6 +1927,7 @@ function switchCharacter() {
     return;
   }
   loadedCharacterSettings = {};
+  modelSession.reset();
   state.currentCharacter = '';
   showLoginScreen();
 }
@@ -1767,6 +1969,7 @@ function deleteCharacter() {
   conversationRequestEpoch += 1;
   summaryRequestEpoch += 1;
   characterSelectionEpoch += 1;
+  modelSession.reset();
   state.currentCharacter = '';
   showLoginScreen();
 }
@@ -1826,7 +2029,95 @@ function saveSettingValue(key, input, value) {
   return true;
 }
 
-apiKeyInput.addEventListener('change', function() { saveSettingValue('apiKey', this, this.value.trim()); });
+function saveGlobalModelConfigPatch(patch, input, previousValue) {
+  var nextConfig = modelConfigApi.normalizeConfig(Object.assign({}, modelConfig, patch || {}));
+  var saveResult = modelConfigApi.saveConfig(localStorage, nextConfig);
+  if (!saveResult || saveResult.ok !== true) {
+    if (input) input.value = previousValue === undefined ? '' : previousValue;
+    var configSaveError = saveResult && saveResult.error;
+    reportSaveFailure({
+      ok: false,
+      rolledBack: !saveResult || !saveResult.rollbackError,
+      quotaExceeded: Boolean(FonlingMemory.Storage && FonlingMemory.Storage.isQuotaExceededError && FonlingMemory.Storage.isQuotaExceededError(configSaveError))
+    }, {
+      restored: '全局模型设置保存失败，原设置已恢复。',
+      partial: '全局模型设置保存失败，本地存储可能不完整，请立即导出角色备份。'
+    });
+    return false;
+  }
+  modelConfig = saveResult.config;
+  return true;
+}
+
+function toggleSecretInput(input, button, label) {
+  var show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  button.textContent = show ? '隐藏' : '显示';
+  button.setAttribute('aria-label', (show ? '隐藏 ' : '显示 ') + label + ' API Key');
+}
+
+function connectionFailureStatus(error) {
+  if (error && (error.kind === 'auth' || error.kind === 'permission')) return 'invalid_key';
+  if (error && error.kind === 'rate_limit') return 'rate_limited';
+  if (error && (error.kind === 'network' || error.kind === 'server')) return 'unavailable';
+  return 'error';
+}
+
+async function testModelConnection(provider) {
+  var isDeepseek = provider === 'deepseek';
+  var input = isDeepseek ? deepseekApiKeyInput : glmApiKeyInput;
+  var button = isDeepseek ? testDeepseekBtn : testGlmBtn;
+  var keyName = isDeepseek ? 'deepseekApiKey' : 'glmApiKey';
+  var key = input.value.trim();
+  if (!key) { addSystemMsg('请先填写 ' + (isDeepseek ? 'DeepSeek' : 'GLM') + ' API Key', true); return; }
+  if (!saveGlobalModelConfigPatch({ [keyName]: key }, input, modelConfig[keyName])) return;
+  button.disabled = true;
+  var testingConfig = Object.assign({}, modelConfig.connectionTests, {
+    [provider]: { status: 'testing', checkedAt: '', message: '' }
+  });
+  modelConfig = modelConfigApi.normalizeConfig(Object.assign({}, modelConfig, { connectionTests: testingConfig }));
+  renderConnectionStatus(provider);
+  try {
+    await requestModel(createModelRequestPlan('connection_test', { provider: provider }), [
+      { role: 'user', content: '只回复“好”。' }
+    ]);
+    var successTests = Object.assign({}, modelConfig.connectionTests, {
+      [provider]: { status: 'success', checkedAt: new Date().toISOString(), message: '连接成功' }
+    });
+    saveGlobalModelConfigPatch({ connectionTests: successTests });
+  } catch (error) {
+    var failureTests = Object.assign({}, modelConfig.connectionTests, {
+      [provider]: { status: connectionFailureStatus(error), checkedAt: new Date().toISOString(), message: error && error.message ? error.message : '连接失败' }
+    });
+    saveGlobalModelConfigPatch({ connectionTests: failureTests });
+  } finally {
+    button.disabled = false;
+    renderConnectionStatus(provider);
+  }
+}
+
+glmApiKeyInput.addEventListener('change', function() {
+  saveGlobalModelConfigPatch({ glmApiKey: this.value.trim() }, this, modelConfig.glmApiKey);
+});
+deepseekApiKeyInput.addEventListener('change', function() {
+  saveGlobalModelConfigPatch({ deepseekApiKey: this.value.trim() }, this, modelConfig.deepseekApiKey);
+});
+$('toggleGlmKeyBtn').addEventListener('click', function() { toggleSecretInput(glmApiKeyInput, this, 'GLM'); });
+$('toggleDeepseekKeyBtn').addEventListener('click', function() { toggleSecretInput(deepseekApiKeyInput, this, 'DeepSeek'); });
+testGlmBtn.addEventListener('click', function() { testModelConnection('glm'); });
+testDeepseekBtn.addEventListener('click', function() { testModelConnection('deepseek'); });
+defaultProviderSelect.addEventListener('change', function() {
+  var nextProvider = this.value === 'deepseek' ? 'deepseek' : 'glm';
+  if (nextProvider === 'deepseek' && !confirm('DeepSeek 可能产生费用，确定将它设为普通剧情的默认模型吗？')) {
+    this.value = modelConfig.defaultProvider;
+    return;
+  }
+  saveGlobalModelConfigPatch({ defaultProvider: nextProvider }, this, modelConfig.defaultProvider);
+});
+airModeBtn.addEventListener('click', function() {
+  modelSession.armAir();
+  updateModelStatusBar();
+});
 systemPromptInput.addEventListener('change', function() { saveSettingValue('systemPrompt', this, this.value.trim()); });
 styleInput.addEventListener('change', function() { saveSettingValue('style', this, this.value.trim()); });
 userIdentityInput.addEventListener('change', function() { saveSettingValue('userIdentity', this, this.value.trim()); });
@@ -2075,6 +2366,7 @@ function switchToRole(name) {
         });
         return;
       }
+      modelSession.reset();
       updateBubbleColor();
       renderRoles();
       updateIdentityBar();
@@ -2097,6 +2389,7 @@ function switchToMain() {
     });
     return;
   }
+  modelSession.reset();
   renderRoles();
   renderMessages();
   updateIdentityBar();
@@ -2104,9 +2397,17 @@ function switchToMain() {
 function updateIdentityBar() {
   var bar = document.getElementById('identityBar');
   if (!bar) return;
-  if (state.roles.length === 0) { bar.style.display = 'none'; return; }
-  bar.style.display = 'block';
-  bar.textContent = state.currentRole ? ('当前身份：' + state.currentRole) : '当前身份：主控';
+  var dot = document.getElementById('identityDot');
+  var name = document.getElementById('identityName');
+  var label = state.currentRole || '主控';
+  var color = '#ffffff';
+  for (var i = 0; i < state.roles.length; i++) {
+    if (state.roles[i].name === state.currentRole) { color = state.roles[i].color || '#ffffff'; break; }
+  }
+  if (dot) dot.style.backgroundColor = color;
+  if (name) { name.textContent = label; name.title = label; }
+  bar.setAttribute('aria-label', '当前身份：' + label);
+  updateModelStatusBar();
 }
 
 function updateBubbleColor() {

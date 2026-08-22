@@ -39,6 +39,16 @@ function loadAutoSummarize(fetchImpl, options = {}) {
     renderMessages() {},
     setTimeout(callback) { callback(); },
     fetch: fetchImpl,
+    createModelRequestPlan(task) { return { task, provider: 'glm', model: 'glm-4.7-flash', apiKey: 'test-key' }; },
+    async requestModel(plan, messages) {
+      const response = await fetchImpl('https://example.test/chat', {
+        method: 'POST',
+        body: JSON.stringify({ model: plan.model, messages, stream: false, max_tokens: 1024 }),
+      });
+      if (!response.ok) throw new Error('request failed');
+      const data = await response.json();
+      return { content: data.choices?.[0]?.message?.content || '', plan, attempts: 1 };
+    },
   };
 
   vm.runInNewContext(`${fn}; this.autoSummarize = autoSummarize;`, context);

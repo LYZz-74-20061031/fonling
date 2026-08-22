@@ -159,6 +159,27 @@ function loadRequestHarness(options) {
       if (content) onDelta(content, content);
       return content;
     },
+    createModelRequestPlan(_task, options) {
+      const tier = options && options.tier === 'air' ? 'air' : 'free';
+      return { task: 'chat', provider: 'glm', model: tier === 'air' ? 'glm-4.5-air' : 'test-model', tier, apiKey: 'test-key' };
+    },
+    async requestModel(plan, messages, onDelta) {
+      const response = await sandbox.fetch('https://example.test/chat', {
+        body: JSON.stringify({ model: plan.model, messages, stream: true, max_tokens: 4096 }),
+      });
+      if (!response.ok) throw new Error(`request failed (${response.status})`);
+      const content = await sandbox.readSseContent(response.body, typeof onDelta === 'function' ? onDelta : function() {});
+      return { content, attempts: 1, plan };
+    },
+    modelSession: {
+      snapshot() { return { armed: false, busy: false, activeTier: 'free' }; },
+      beginSend() { return { id: 'send', tier: 'free', method: 'send' }; },
+      beginAirRegenerate() { return { id: 'regenerate', tier: 'air', method: 'regenerate' }; },
+      finish() { return true; },
+    },
+    modelSessionApi: {
+      createGenerationMetadata(plan, method) { return { provider: plan.provider, model: plan.model, tier: plan.tier, method, generatedAt: '2026-08-23T00:00:00.000Z' }; },
+    },
     saveCurrentCharacter() {
       const index = sandbox.saveCount++;
       if (config.throwSaveAt === index) throw new Error('storage');
@@ -482,7 +503,7 @@ test('regenerate keeps the committed reply when post-save message rendering fail
   const harness = loadRequestHarness({
     ids: ['message_assistant_regenerated'],
     state,
-    throwRenderAt: 2,
+    throwRenderAt: 0,
   });
 
   await assert.doesNotReject(harness.sandbox.regenerateMessage());

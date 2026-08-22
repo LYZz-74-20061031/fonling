@@ -81,6 +81,22 @@ function createRaceHarness(options = {}) {
       if (content) onDelta(content, content);
       return content;
     },
+    createModelRequestPlan(_task, requestOptions) { const tier = requestOptions && requestOptions.tier === 'air' ? 'air' : 'free'; return { task: 'chat', provider: 'glm', model: tier === 'air' ? 'glm-4.5-air' : 'story-model', tier, apiKey: 'test-key' }; },
+    async requestModel(plan, messages, onDelta) {
+      const response = await sandbox.fetch('https://story.test/chat', { body: JSON.stringify({ messages }) });
+      if (!response.ok) throw new Error(`request failed (${response.status})`);
+      const content = await sandbox.readSseContent(response.body, typeof onDelta === 'function' ? onDelta : function() {});
+      return { content, attempts: 1, plan };
+    },
+    modelSession: {
+      snapshot() { return { armed: false, busy: false, activeTier: 'free' }; },
+      beginSend() { return { id: 'send', tier: 'free' }; },
+      beginAirRegenerate() { return { id: 'regenerate', tier: 'air' }; },
+      finish() { return true; },
+    },
+    modelSessionApi: {
+      createGenerationMetadata(plan, method) { return { provider: plan.provider, model: plan.model, tier: plan.tier, method, generatedAt: 'now' }; },
+    },
     saveCurrentCharacter() {
       storySaveCount += 1;
       if (options.storySaveFails) return { ok: false, rolledBack: true };
@@ -156,6 +172,7 @@ test('successful regenerate invalidates old in-flight analysis and only analyzes
 
   const regenerate = harness.sandbox.regenerateMessage();
   await waitFor(() => harness.storyRequests.length === 1, 'regenerate request did not start');
+  assert.equal(harness.state.messages.at(-1).id, 'a-old', 'old reply must stay visible until the Air replacement commits');
   harness.resolveAnalysis(0, 'a-old', '旧回答产生的候选');
   assert.equal((await oldWork).skipped, 'STALE_ANALYSIS_EPOCH');
   assert.equal(harness.stored.memoryCandidates.length, 0);

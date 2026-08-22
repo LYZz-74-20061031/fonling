@@ -1,0 +1,224 @@
+/* Global model settings */
+.model-settings-card {
+  padding: 15px;
+  border: 1px solid #383838;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #202020, #171717);
+}
+
+.model-settings-card h3 {
+  color: #f2f2f2;
+  font-size: 16px;
+  margin: 0 0 5px;
+}
+
+.model-settings-scope,
+.model-cost-note {
+  color: #999;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.model-cost-note {
+  margin-top: 9px;
+  color: #c9aa68;
+}
+
+.model-key-row,
+.model-test-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-key-row input {
+  min-width: 0;
+  flex: 1;
+}
+
+.model-key-toggle,
+.model-test-btn {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  color: #ddd;
+  background: #272727;
+  font-size: 13px;
+}
+
+.model-test-row {
+  margin-top: 9px;
+}
+
+.model-test-btn:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.model-connection-status {
+  min-width: 0;
+  color: #888;
+  font-size: 12px;
+}
+
+.model-connection-status[data-status="success"] { color: #63d78b; }
+.model-connection-status[data-status="invalid_key"],
+.model-connection-status[data-status="error"] { color: #ff7979; }
+.model-connection-status[data-status="rate_limited"],
+.model-connection-status[data-status="unavailable"] { color: #e7bd65; }
+
+.model-readonly-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.model-readonly-grid div {
+  min-width: 0;
+  padding: 9px;
+  border-radius: 9px;
+  background: #111;
+}
+
+.model-readonly-grid span,
+.model-readonly-grid strong {
+  display: block;
+}
+
+.model-readonly-grid span { color: #777; font-size: 11px; }
+.model-readonly-grid strong { color: #ddd; font-size: 12px; margin-top: 3px; }
+
+#defaultProviderSelect {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  background: #151515;
+  color: #e5e5e5;
+}
+
+#deepseekBackupSettings {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid #353535;
+}
+
+#deepseekBackupSettings summary {
+  color: #bbb;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* Compact composer status */
+#modelStatusBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 11px;
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255,255,255,.07);
+  background: #111;
+}
+
+#airModeBtn {
+  min-width: 0;
+  max-width: 68%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 9px;
+  border: 1px solid #3f3f3f;
+  border-radius: 999px;
+  color: #aaa;
+  background: #191919;
+  font-size: 12px;
+}
+
+#airModeBtn[aria-pressed="true"] {
+  color: #191308;
+  border-color: #d8b25b;
+  background: linear-gradient(135deg, #f1d58b, #c89539);
+}
+
+#airModeBtn:disabled { opacity: .55; cursor: default; }
+
+#identityBar {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 38%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #bbb;
+  font-size: 12px;
+}
+
+#identityDot {
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 50%;
+  background: #fff;
+}
+
+#identityName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#sendBtn {
+  background: #fff !important;
+  color: #111 !important;
+  box-shadow: 0 2px 8px rgba(255,255,255,.14) !important;
+}
+
+.model-tier-badge {
+  align-self: flex-start;
+  margin: 3px 0 0 6px;
+  padding: 2px 7px;
+  border: 1px solid #a87c2c;
+  border-radius: 999px;
+  color: #e5bd68;
+  background: rgba(125,88,22,.18);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.model-failure-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: -6px 12px 14px;
+}
+
+.model-failure-actions button {
+  padding: 6px 10px;
+  border: 1px solid #494949;
+  border-radius: 8px;
+  color: #ccc;
+  background: #1b1b1b;
+  font-size: 12px;
+}
+
+.model-failure-actions button:last-child {
+  color: #e5bd68;
+  border-color: #8b6727;
+}
+
+@media (max-width: 480px) {
+  #modelStatusBar { gap: 7px; padding-inline: 9px; }
+  #airModeBtn { max-width: 72%; font-size: 11px; }
+  #identityBar { max-width: 34%; }
+  .model-readonly-grid { grid-template-columns: 1fr; }
+}

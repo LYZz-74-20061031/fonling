@@ -374,7 +374,10 @@
   async function analyzeTurn(input) {
     const source = isRecord(input) ? input : {};
     const fetchImpl = typeof source.fetchImpl === 'function' ? source.fetchImpl : global.fetch;
-    if (typeof fetchImpl !== 'function' || !cleanString(source.apiUrl) || !cleanString(source.apiKey) || !cleanString(source.model)) {
+    const requestImpl = typeof source.requestImpl === 'function' ? source.requestImpl : null;
+    const hasLegacyRequestConfig = typeof fetchImpl === 'function' && cleanString(source.apiUrl)
+      && cleanString(source.apiKey) && cleanString(source.model);
+    if (!requestImpl && !hasLegacyRequestConfig) {
       return { ok: false, candidates: [], error: 'ANALYSIS_CONFIGURATION_MISSING' };
     }
     const timeoutMs = Number.isFinite(Number(source.timeoutMs)) && Number(source.timeoutMs) > 0
@@ -394,6 +397,13 @@
         }, timeoutMs);
       });
       const responseWork = Promise.resolve().then(async function () {
+        if (requestImpl) {
+          const routed = await requestImpl({
+            messages: buildAnalysisMessages(source),
+            signal: abortController ? abortController.signal : undefined,
+          });
+          return { choices: [{ message: { content: cleanString(routed && routed.content) } }] };
+        }
         const response = await fetchImpl(request.url, request.options);
         if (!response || !response.ok) {
           const error = new Error('Analysis request failed.');

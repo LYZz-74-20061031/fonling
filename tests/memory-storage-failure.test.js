@@ -191,6 +191,7 @@ function createInlineSandbox(options = {}) {
   sandbox.globalThis = sandbox; sandbox.window = sandbox;
   const inline = fs.readFileSync('index.html', 'utf8').match(/<script>([\s\S]*?)<\/script>/)?.[1];
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync('js/model/model-config.js', 'utf8'), sandbox);
   return { sandbox, nodes, documentListeners, entries, inline, warnings, readers, images };
 }
 
@@ -236,9 +237,8 @@ test('quota save result preserves the structured contract and exposes quota clas
 test('settings changes roll back state and controls while preserving quota details', () => {
   const app = createInlineSandbox({ quotaFailure: true });
   vm.runInContext(app.inline, app.sandbox, { filename: 'index.html' });
-  vm.runInContext("state.currentCharacter='阿宁'; state.apiKey='old-key'; state.systemPrompt='old-persona'; state.style='old-style'; state.userIdentity='old-user'", app.sandbox);
+  vm.runInContext("state.currentCharacter='阿宁'; modelConfig.deepseekApiKey='old-key'; state.systemPrompt='old-persona'; state.style='old-style'; state.userIdentity='old-user'", app.sandbox);
   const cases = [
-    ['apiKeyInput', 'new-key', 'apiKey', 'old-key'],
     ['systemPromptInput', 'new-persona', 'systemPrompt', 'old-persona'],
     ['styleInput', 'new-style', 'style', 'old-style'],
     ['userIdentityInput', 'new-user', 'userIdentity', 'old-user'],
@@ -250,6 +250,10 @@ test('settings changes roll back state and controls while preserving quota detai
     assert.equal(app.warnings.at(-1).quotaExceeded, true);
     assert.equal(app.warnings.at(-1).message, '存储空间不足，请立即导出备份');
   }
+  const apiInput = app.nodes.get('deepseekApiKeyInput'); apiInput.value = 'new-key'; apiInput.dispatch('change');
+  assert.equal(vm.runInContext('modelConfig.deepseekApiKey', app.sandbox), 'old-key');
+  assert.equal(apiInput.value, 'old-key');
+  assert.equal(app.warnings.at(-1).quotaExceeded, true);
 });
 
 test('background, role, and message edits roll back and surface the quota modal contract', () => {

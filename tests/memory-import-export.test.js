@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const ModelConfig = require('../js/model/model-config.js');
 
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
 
@@ -46,6 +47,8 @@ function loadHarness(options = {}) {
   class FakeFileReader { readAsText(file) { this.onload({ target: { result: file.contents } }); } }
   const context = {
     state, JSON, Date, FileReader: FakeFileReader, FonlingMemory: { Storage: storageApi },
+    modelConfigApi: ModelConfig,
+    modelConfig: ModelConfig.createDefaultConfig(),
     LS: { CHAR_PREFIX: 'ai_char_', CHAR_LIST: 'ai_char_list', CURRENT_CHAR: 'ai_current_char' },
     localStorage: {
       getItem(key) { return entries.has(key) ? entries.get(key) : null; },
@@ -65,15 +68,17 @@ function loadHarness(options = {}) {
     settingsOverlay: { classList: { remove(value) { uiCalls.push(`close:${value}`); } } },
     addSystemMsg(text, isError) { messages.push({ text, isError }); },
     memoryUI: { showStorageWarning(details) { warnings.push(details); } },
+    modelSession: { reset() {} },
     characterMutationIsBlocked() { return false; },
     characterSelectionEpoch: 0, conversationRequestEpoch: 0, summaryRequestEpoch: 0, backgroundOperationEpoch: 0,
   };
   const declarations = html.match(/(?:var|let) loadedCharacterSettings[^;]*;/)?.[0] || '';
-  const functions = ['getCharDataKey', 'getCharMsgKey', 'saveCurrentCharacter', 'reportSaveFailure', 'buildExportData', 'normalizeImportedCharacter', 'importData']
+  const functions = ['getCharDataKey', 'getCharMsgKey', 'sanitizeCharacterSettings', 'migrateLegacyModelConfig', 'saveCurrentCharacter', 'reportSaveFailure', 'buildExportData', 'normalizeImportedCharacter', 'importData']
     .map(name => extractFunction(html, name)).join('\n');
   vm.runInNewContext(`${declarations}\n${functions}\nthis.api = {
     buildExportData, normalizeImportedCharacter, importData, realSave: saveCurrentCharacter,
-    getSnapshot: function() { return loadedCharacterSettings; }, setSnapshot: function(value) { loadedCharacterSettings = value; }
+    getSnapshot: function() { return loadedCharacterSettings; }, setSnapshot: function(value) { loadedCharacterSettings = value; },
+    getModelConfig: function() { return modelConfig; }
   };`, context);
   let saveCount = 0;
   context.saveCurrentCharacter = function() { saveCount += 1; return context.api.realSave(); };
@@ -175,7 +180,8 @@ test('buildExportData creates a version 2 single-character snapshot that round-t
   assert.deepEqual(plain(normalized.settings.memoryAnalysis), plain(harness.state.memoryAnalysis));
   assert.deepEqual(plain(normalized.settings.memoryRequestTraces), plain(harness.state.memoryRequestTraces));
   assert.deepEqual(plain(normalized.messages), plain(harness.state.messages));
-  assert.equal(exported.settings.apiKey, harness.state.apiKey); assert.equal(exported.settings.currentRole, harness.state.currentRole);
+  assert.equal(Object.prototype.hasOwnProperty.call(exported.settings, 'apiKey'), false);
+  assert.equal(exported.settings.currentRole, harness.state.currentRole);
 });
 
 test('buildExportData deeply copies settings, memory data, and messages', () => {
@@ -190,7 +196,7 @@ test('saveCurrentCharacter restores both raw storage values when the second writ
   const harness = loadHarness({ failSetItemAt: 2 });
   const beforeEntries = JSON.stringify([...harness.entries]);
   const beforeSnapshot = JSON.stringify(harness.api.getSnapshot());
-  harness.state.apiKey = 'changed-key';
+  harness.state.style = 'changed-style';
   harness.state.messages = [{ id: 'changed-message', role: 'user', content: 'changed' }];
 
   const saved = harness.api.realSave();
@@ -206,7 +212,7 @@ test('saveCurrentCharacter leaves both raw storage values unchanged when the fir
   const harness = loadHarness({ failSetItemAt: 1 });
   const beforeEntries = JSON.stringify([...harness.entries]);
   const beforeSnapshot = JSON.stringify(harness.api.getSnapshot());
-  harness.state.apiKey = 'changed-key';
+  harness.state.style = 'changed-style';
 
   const saved = harness.api.realSave();
 
@@ -236,15 +242,16 @@ test('saveCurrentCharacter reports rollback failure and asks for a backup when r
 
 test('saveCurrentCharacter reports success only after updating both keys and the settings snapshot', () => {
   const harness = loadHarness();
-  harness.state.apiKey = 'saved-key';
+  harness.state.style = 'saved-style';
   harness.state.messages = [{ id: 'saved-message', role: 'assistant', content: 'saved' }];
 
   const saved = harness.api.realSave();
 
   assert.deepEqual(plain(saved), { ok: true, rolledBack: true });
-  assert.equal(JSON.parse(harness.entries.get('ai_char_ari_data')).apiKey, 'saved-key');
+  assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(harness.entries.get('ai_char_ari_data')), 'apiKey'), false);
+  assert.equal(JSON.parse(harness.entries.get('ai_char_ari_data')).style, 'saved-style');
   assert.deepEqual(JSON.parse(harness.entries.get('ai_char_ari_msg')), harness.state.messages);
-  assert.equal(harness.api.getSnapshot().apiKey, 'saved-key');
+  assert.equal(Object.prototype.hasOwnProperty.call(harness.api.getSnapshot(), 'apiKey'), false);
   assert.deepEqual(plain(harness.api.getSnapshot().oldOnly), { owner: 'old-character' });
 });
 
@@ -299,7 +306,9 @@ test('importData replaces the complete character snapshot, saves once, and advan
   const harness = loadHarness(); const backup = version2Backup();
   harness.api.importData({ contents: JSON.stringify(backup) });
   assert.equal(harness.getSaveCount(), 1); assert.equal(harness.state.currentCharacter, 'Ari');
-  assert.equal(harness.state.apiKey, 'new-key'); assert.equal(harness.state.currentRole, 'Hero');
+  assert.equal(Object.prototype.hasOwnProperty.call(harness.state, 'apiKey'), false);
+  assert.equal(harness.api.getModelConfig().deepseekApiKey, 'new-key');
+  assert.equal(harness.state.currentRole, 'Hero');
   assert.deepEqual(plain(harness.state.memories), backup.settings.memories);
   assert.deepEqual(plain(harness.state.memoryCandidates), backup.settings.memoryCandidates);
   assert.deepEqual(plain(harness.state.messages), backup.messages);
@@ -352,10 +361,11 @@ test('importData keeps committed data and reports a refresh warning when UI rend
   harness.api.importData({ contents: JSON.stringify(version2Backup()) });
 
   assert.equal(harness.getSaveCount(), 1);
-  assert.equal(harness.state.apiKey, 'new-key');
+  assert.equal(Object.prototype.hasOwnProperty.call(harness.state, 'apiKey'), false);
+  assert.equal(harness.api.getModelConfig().deepseekApiKey, 'new-key');
   assert.deepEqual(plain(harness.state.messages), version2Backup().messages);
   assert.notEqual(JSON.stringify([...harness.entries]), beforeEntries);
-  assert.equal(JSON.parse(harness.entries.get('ai_char_ari_data')).apiKey, 'new-key');
+  assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(harness.entries.get('ai_char_ari_data')), 'apiKey'), false);
   assert.deepEqual(JSON.parse(harness.entries.get('ai_char_ari_msg')), version2Backup().messages);
   assert.deepEqual(plain(harness.api.getSnapshot().importedOnly), { nested: true });
   assert.deepEqual(harness.uiCalls, ['sync']);

@@ -387,6 +387,24 @@ test('analyzeTurn injects fetch settings and returns filtered candidates without
   assert.equal(failed.error, 'ANALYSIS_REQUEST_FAILED');
 });
 
+test('analyzeTurn accepts the shared routed request without legacy provider credentials', async () => {
+  const { Analyzer } = loadMemory();
+  let routedRequest;
+  const result = await Analyzer.analyzeTurn({
+    recentMessages: [{ id: 'u1', role: 'user', content: '继续' }, { id: 'a1', role: 'assistant', content: '阿宁抵达旧港' }],
+    validSourceMessageIds: ['u1', 'a1'], memories: [], pendingCandidates: [],
+    requestImpl: async request => {
+      routedRequest = request;
+      return { content: JSON.stringify({ shouldSuggest: true, candidates: [candidate()] }) };
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.candidates.length, 1);
+  assert.ok(routedRequest.messages.some(message => message.content.includes('STORY_CONTEXT_BEGIN')));
+  assert.ok(Object.prototype.hasOwnProperty.call(routedRequest, 'signal'));
+});
+
 test('analyzeTurn times out a never-settling fetch, aborts it, and ignores a late rejection', async () => {
   const { Analyzer } = loadMemory();
   let rejectLate;

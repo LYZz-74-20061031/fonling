@@ -218,6 +218,7 @@ test('renderMessages adds stable hooks and a trace action only for traced assist
       roles: [],
     },
     memoryUI: { openTrace(id) { opened.push(id); } },
+    modelSessionApi: { isAirGeneration() { return false; } },
     formatMsgText(value) { return value; },
     scrollToBottom() {}, backtrackMessage() {}, startEdit() {}, regenerateMessage() {},
   };
