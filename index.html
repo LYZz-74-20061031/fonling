@@ -8,6 +8,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-512.png">
 <meta name="theme-color" content="#0d0d0d">
+<link rel="stylesheet" href="css/memory.css">
 <style>
 /* ===== Reset & Base ===== */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -184,6 +185,7 @@ textarea{resize:none}
 
   <main id="chatArea"></main>
   <div id="identityBar"></div>
+  <div id="memoryPromptBar" role="button" tabindex="0" aria-live="polite" hidden><span id="memoryPromptText"></span></div>
   <footer id="inputBar">
     <textarea id="messageInput" rows="1" placeholder="输入消息…" enterkeyhint="send"></textarea>
     <button id="sendBtn" aria-label="发送">➤</button>
@@ -222,17 +224,9 @@ textarea{resize:none}
       <span class="desc">告诉 AI 你的身份信息，作为全局记忆</span>
       <textarea id="userIdentityInput" rows="3" placeholder="例如：我是李明，28岁，软件工程师，正在准备考研…"></textarea>
 
-      <span class="label">历史事件（全局记忆，优先级最高）</span>
-      <span class="desc">重要事件永久保留在上下文中，不会被对话压缩影响。每条独立存储。</span>
-      <div id="historyEventsContainer"></div>
       <div class="spacer"></div>
-      <button class="btn-block btn-outline" id="addEventBtn">+ 添加历史事件</button>
-      <div class="spacer"></div>
-      <span class="label">关键信息</span>
-      <span class="desc">让 AI 记住的关键信息，如人物关系、重要事件等</span>
-      <div id="keyInfoContainer"></div>
-      <div class="spacer"></div>
-      <button class="btn-block btn-outline" id="addKeyInfoBtn">+ 添加关键信息</button>
+      <span class="desc">历史事件、关键信息和当前场景在记忆中心统一管理。</span>
+      <button class="btn-block btn-primary" id="memoryCenterBtn">记忆中心</button>
 
 
       <div class="spacer"></div>
@@ -243,11 +237,6 @@ textarea{resize:none}
       <button class="btn-block btn-outline" id="addRoleBtn">+ 添加角色</button>
       <div class="spacer"></div>
       <button class="btn-block btn-primary" id="switchToMainBtn">回到主控身份</button>
-
-      <div class="spacer"></div>
-      <span class="label">当下状态</span>
-      <span class="desc">记录当前时间、职务、事件、危机等实时信息</span>
-      <textarea id="currentStateInput" rows="3" placeholder="例如：现在是2026年7月，我正在准备重要的演讲…"></textarea>
 
       <span class="label">聊天背景</span>
       <span class="desc">从相册选择图片作为聊天背景，关闭页面后依然保留</span>
@@ -291,6 +280,72 @@ textarea{resize:none}
   </div>
 </div>
 
+<div id="memoryCandidateSheet" class="memory-candidate-overlay" aria-hidden="true" hidden>
+  <div class="memory-candidate-backdrop" data-memory-candidate-backdrop></div>
+  <section class="memory-candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="memoryCandidateTitle">
+    <div class="memory-candidate-handle" aria-hidden="true"></div>
+    <header class="memory-candidate-header"><h2 id="memoryCandidateTitle">新的记忆建议</h2><button id="memoryCandidateCloseBtn" class="memory-icon-btn" type="button" aria-label="关闭记忆建议">关闭</button></header>
+    <div id="memoryCandidateList" class="memory-candidate-list"></div>
+    <button id="memoryCandidateCenterBtn" class="memory-primary memory-candidate-center" type="button">进入记忆中心</button>
+  </section>
+</div>
+<div id="memoryTraceOverlay" class="memory-trace-overlay" aria-hidden="true" hidden>
+  <div class="memory-trace-backdrop" data-memory-trace-backdrop></div>
+  <section class="memory-trace-sheet" role="dialog" aria-modal="true" aria-labelledby="memoryTraceTitle">
+    <header class="memory-candidate-header"><h2 id="memoryTraceTitle">本次使用的记忆</h2><button id="memoryTraceCloseBtn" class="memory-icon-btn" type="button" aria-label="关闭记忆使用详情">关闭</button></header>
+    <div id="memoryTraceContent" class="memory-trace-content"></div>
+  </section>
+</div>
+<div id="memoryCenterOverlay" class="memory-center-overlay" aria-hidden="true">
+  <div class="memory-center-overlay-bg" data-memory-backdrop></div>
+  <section class="memory-center" role="dialog" aria-modal="true" aria-labelledby="memoryCenterTitle">
+    <header class="memory-center-header">
+      <h2 id="memoryCenterTitle">记忆中心</h2><span class="memory-character" id="memoryCharacterName"></span>
+      <button class="memory-icon-btn" id="memoryCenterCloseBtn" aria-label="关闭记忆中心">关闭</button>
+    </header>
+    <p id="memoryStorageSize" class="memory-storage-size" aria-live="polite"></p>
+    <nav id="memoryCenterTabs" class="memory-center-tabs" role="tablist">
+      <button id="memoryHistoryTab" class="memory-tab active" data-tab="history" role="tab" aria-controls="memoryHistoryPanel">历史事件</button>
+      <button id="memoryKeyInfoTab" class="memory-tab" data-tab="key-info" role="tab" aria-controls="memoryKeyInfoPanel">关键信息</button>
+      <button id="memorySceneTab" class="memory-tab" data-tab="scene" role="tab" aria-controls="memoryScenePanel">当前场景</button>
+      <button id="memoryPendingTab" class="memory-tab" data-tab="pending" role="tab" aria-controls="memoryPendingPanel">待确认</button>
+    </nav>
+    <div class="memory-panels">
+      <section id="memoryHistoryPanel" class="memory-panel" data-panel="history" aria-labelledby="memoryHistoryTab"><div class="memory-toolbar"><p>保留重要剧情节点。</p><button class="memory-primary" id="memoryAddHistoryBtn">新增历史事件</button></div><form id="memoryAddHistoryForm" class="memory-add-form" hidden><label for="memoryAddHistoryInput">历史事件内容</label><textarea id="memoryAddHistoryInput"></textarea><div class="memory-add-actions"><button class="memory-primary" id="memoryAddHistoryConfirmBtn" type="submit">确认新增</button><button class="memory-action" id="memoryAddHistoryCancelBtn" type="button">取消</button></div></form><div id="memoryHistoryList" class="memory-list"></div></section>
+      <section id="memoryKeyInfoPanel" class="memory-panel" data-panel="key-info" aria-labelledby="memoryKeyInfoTab" hidden><div class="memory-toolbar"><p>保存人物、关系和世界设定。</p><button class="memory-primary" id="memoryAddKeyInfoBtn">新增关键信息</button></div><form id="memoryAddKeyInfoForm" class="memory-add-form" hidden><label for="memoryAddKeyInfoInput">关键信息内容</label><textarea id="memoryAddKeyInfoInput"></textarea><div class="memory-add-actions"><button class="memory-primary" id="memoryAddKeyInfoConfirmBtn" type="submit">确认新增</button><button class="memory-action" id="memoryAddKeyInfoCancelBtn" type="button">取消</button></div></form><div id="memoryKeyInfoList" class="memory-list"></div></section>
+      <section id="memoryScenePanel" class="memory-panel" data-panel="scene" aria-labelledby="memorySceneTab" hidden>
+        <form id="memorySceneForm" class="memory-scene-form" onsubmit="return false">
+          <div class="memory-field"><label for="memorySceneTime">时间</label><input id="memorySceneTime" data-scene-key="time"></div>
+          <div class="memory-field"><label for="memorySceneLocation">地点</label><input id="memorySceneLocation" data-scene-key="location"></div>
+          <div class="memory-field memory-field-wide"><label for="memorySceneCharacters">在场角色（逗号分隔）</label><input id="memorySceneCharacters" data-scene-key="presentCharacters"></div>
+          <div class="memory-field"><label for="memorySceneGoal">当前目标</label><textarea id="memorySceneGoal" data-scene-key="currentGoal"></textarea></div>
+          <div class="memory-field"><label for="memorySceneConflict">当前冲突</label><textarea id="memorySceneConflict" data-scene-key="currentConflict"></textarea></div>
+          <div class="memory-field"><label for="memorySceneStates">角色状态</label><textarea id="memorySceneStates" data-scene-key="characterStates"></textarea></div>
+          <div class="memory-field"><label for="memorySceneEnvironment">环境</label><textarea id="memorySceneEnvironment" data-scene-key="environment"></textarea></div>
+          <div class="memory-field memory-field-wide"><label for="memorySceneNotes">备注</label><textarea id="memorySceneNotes" data-scene-key="notes"></textarea></div>
+          <div class="memory-scene-actions"><button class="memory-primary" id="memorySceneSaveBtn" type="button">保存场景</button><button class="memory-danger" id="memorySceneClearBtn" type="button">清空场景</button></div>
+        </form>
+      </section>
+      <section id="memoryPendingPanel" class="memory-panel" data-panel="pending" aria-labelledby="memoryPendingTab" hidden><div class="memory-toolbar"><p>检查最近一轮剧情，提出待确认的记忆。</p><button id="memoryAnalyzeBtn" class="memory-action">整理记忆</button></div><div id="memoryPendingList"></div></section>
+    </div>
+    <div id="memoryToast" class="memory-toast" role="alert" aria-live="assertive" hidden></div>
+  </section>
+</div>
+<div id="memoryStorageWarningOverlay" class="memory-storage-warning-overlay" aria-hidden="true" hidden>
+  <div class="memory-storage-warning-backdrop"></div>
+  <section class="memory-storage-warning" role="alertdialog" aria-modal="true" aria-labelledby="memoryStorageWarningTitle" aria-describedby="memoryStorageWarningMessage">
+    <h2 id="memoryStorageWarningTitle">无法保存数据</h2>
+    <p id="memoryStorageWarningMessage">存储空间不足，请立即导出备份</p>
+    <div class="memory-storage-warning-actions"><button id="memoryStorageWarningExportBtn" class="memory-primary" type="button">立即导出备份</button><button id="memoryStorageWarningCloseBtn" class="memory-action" type="button">稍后处理</button></div>
+  </section>
+</div>
+
+<script src="js/memory/memory-model.js"></script>
+<script src="js/memory/memory-storage.js"></script>
+<script src="js/memory/memory-context.js"></script>
+<script src="js/memory/memory-analyzer.js"></script>
+<script src="js/memory/memory-ui.js"></script>
+<script src="js/memory/memory-controller.js"></script>
 <script>
 /* ==============================================
    智能剧情故事 — 完整应用脚本
@@ -316,15 +371,25 @@ let state = {
    messages: [],
    summary: '',
   userIdentity: '',
-  historyEvents: [],
-  keyInfo: [],
-  currentState: '',
+  memorySchemaVersion: 2,
+  memories: [],
+  currentScene: {
+    time: '', location: '', presentCharacters: [], currentGoal: '', currentConflict: '',
+    characterStates: '', environment: '', notes: '', updatedAt: ''
+  },
+  memoryCandidates: [],
+  memoryAnalysis: { analyzedTurnKeys: [], lastFailure: null, activeCharacter: null },
+  memoryRequestTraces: {},
   currentCharacter: '',
   roles: [],
   currentRole: null,
   isStreaming: false,
   summarising: false,
 };
+let conversationRequestEpoch = 0;
+let summaryRequestEpoch = 0;
+let backgroundOperationEpoch = 0;
+let characterSelectionEpoch = 0;
 
 const $ = id => document.getElementById(id);
  const chatArea = $('chatArea');
@@ -337,14 +402,149 @@ const $ = id => document.getElementById(id);
  const bgFileInput = $('bgFileInput');
  const importFileInput = $('importFileInput');
 const userIdentityInput = $('userIdentityInput');
-const currentStateInput = $('currentStateInput');
-const historyEventsContainer = $('historyEventsContainer');
-const addEventBtn = $('addEventBtn');
 const switchCharBtn = $('switchCharBtn');
 const deleteCharBtn = $('deleteCharBtn');
 const charNameInput = $('charNameInput');
 const loginCharBtn = $('loginCharBtn');
 const createCharBtn = $('createCharBtn');
+
+var memorySceneFields = {};
+document.querySelectorAll('[data-scene-key]').forEach(function(node) { memorySceneFields[node.dataset.sceneKey] = node; });
+var memoryNamespace = typeof globalThis.FonlingMemory === 'object' && globalThis.FonlingMemory ? globalThis.FonlingMemory : {};
+var memoryModulesPresent = Boolean(
+  memoryNamespace.Model && memoryNamespace.Storage && memoryNamespace.Context && memoryNamespace.Analyzer
+  && memoryNamespace.UI && typeof memoryNamespace.UI.createMemoryUI === 'function'
+  && memoryNamespace.Controller && typeof memoryNamespace.Controller.createMemoryController === 'function'
+);
+var fallbackEmptyMemoryState = function() { return {
+  memorySchemaVersion: 2,
+  memories: [],
+  currentScene: { time: '', location: '', presentCharacters: [], currentGoal: '', currentConflict: '', characterStates: '', environment: '', notes: '', updatedAt: '' },
+  memoryCandidates: [],
+  memoryAnalysis: { analyzedTurnKeys: [], lastFailure: null, activeCharacter: null },
+  memoryRequestTraces: {}
+}; };
+var memoryFallbackId = 0;
+var memoryModel = memoryNamespace.Model || {
+  EMPTY_SCENE: fallbackEmptyMemoryState().currentScene,
+  createId: function(prefix) { memoryFallbackId += 1; return (prefix || 'item') + '_' + Date.now() + '_' + memoryFallbackId; },
+  ensureMessageIds: function(messages) {
+    var seen = {};
+    (Array.isArray(messages) ? messages : []).forEach(function(message) {
+      if (!message || typeof message !== 'object') return;
+      var id = typeof message.id === 'string' ? message.id.trim() : '';
+      if (!id || seen[id]) id = memoryModel.createId('message');
+      message.id = id; seen[id] = true;
+    });
+    return messages;
+  },
+  removeArtifactsAfterMessageIds: function(value, retainedIds) {
+    var next = Object.assign({}, value); var retained = new Set(retainedIds || []);
+    next.memoryCandidates = (value.memoryCandidates || []).filter(function(candidate) { return !(candidate.sourceMessageIds || []).length || candidate.sourceMessageIds.some(function(id) { return retained.has(id); }); });
+    next.memoryRequestTraces = {}; Object.keys(value.memoryRequestTraces || {}).forEach(function(id) { if (retained.has(id)) next.memoryRequestTraces[id] = value.memoryRequestTraces[id]; });
+    return next;
+  },
+  clearConversationMemoryArtifacts: function(value) {
+    return Object.assign({}, value, { messages: [], summary: '', memoryCandidates: [], memoryAnalysis: { analyzedTurnKeys: [], lastFailure: null, activeCharacter: null }, memoryRequestTraces: {} });
+  }
+};
+var memoryStorage = memoryNamespace.Storage || {
+  createEmptyMemoryState: fallbackEmptyMemoryState,
+  migrateCharacterData: function(settings, messages) {
+    var source = settings && typeof settings === 'object' ? settings : {}; var defaults = fallbackEmptyMemoryState();
+    return { supported: true, changed: false, diagnostics: [], settings: Object.assign({}, source, {
+      memorySchemaVersion: source.memorySchemaVersion || defaults.memorySchemaVersion,
+      memories: Array.isArray(source.memories) ? source.memories : [],
+      currentScene: source.currentScene && typeof source.currentScene === 'object' ? source.currentScene : defaults.currentScene,
+      memoryCandidates: Array.isArray(source.memoryCandidates) ? source.memoryCandidates : [],
+      memoryAnalysis: source.memoryAnalysis && typeof source.memoryAnalysis === 'object' ? source.memoryAnalysis : defaults.memoryAnalysis,
+      memoryRequestTraces: source.memoryRequestTraces && typeof source.memoryRequestTraces === 'object' ? source.memoryRequestTraces : {}
+    }), messages: Array.isArray(messages) ? memoryModel.ensureMessageIds(messages) : [] };
+  },
+  serializeMemoryState: function(value) { return {
+    memorySchemaVersion: value.memorySchemaVersion || 2, memories: value.memories || [], currentScene: value.currentScene || fallbackEmptyMemoryState().currentScene,
+    memoryCandidates: value.memoryCandidates || [], memoryAnalysis: value.memoryAnalysis || fallbackEmptyMemoryState().memoryAnalysis, memoryRequestTraces: value.memoryRequestTraces || {}
+  }; },
+  estimateSerializedBytes: function(value) { try { var text = JSON.stringify(value); return typeof text === 'string' ? text.length * 2 : 0; } catch (_) { return 0; } },
+  isQuotaExceededError: function(error) { return Boolean(error && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED' || error.code === 22 || error.code === 1014)); }
+};
+var memoryContext = memoryNamespace.Context || { buildMemoryContextMessages: function() { return { messages: [], trace: { pinnedMemoryIds: [], relatedMemoryIds: [], sceneUpdatedAt: '', usedSummary: false } }; } };
+memoryNamespace.Model = memoryModel;
+memoryNamespace.Storage = memoryStorage;
+memoryNamespace.Context = memoryContext;
+globalThis.FonlingMemory = memoryNamespace;
+var memoryNoopUI = function() {};
+var memoryUI = { render: memoryNoopUI, openCenter: memoryNoopUI, closeCenter: memoryNoopUI, openCandidateSheet: memoryNoopUI, closeCandidateSheet: memoryNoopUI, openSource: memoryNoopUI, openTrace: memoryNoopUI, showAnalysisFailure: memoryNoopUI, showStorageWarning: memoryNoopUI, on: memoryNoopUI };
+var memoryFeatureAvailable = memoryModulesPresent;
+var memoryUnavailableNoticeShown = false;
+var memoryController = { sync: function() {} };
+if (memoryFeatureAvailable) {
+  try {
+    memoryUI = memoryNamespace.UI.createMemoryUI({
+      overlay: $('memoryCenterOverlay'), backdrop: document.querySelector('[data-memory-backdrop]'), closeButton: $('memoryCenterCloseBtn'), characterName: $('memoryCharacterName'),
+      tabs: Array.from(document.querySelectorAll('#memoryCenterTabs [data-tab]')), panels: Array.from(document.querySelectorAll('.memory-panel[data-panel]')),
+      historyList: $('memoryHistoryList'), keyInfoList: $('memoryKeyInfoList'), pendingList: $('memoryPendingList'), sceneFields: memorySceneFields,
+      addHistory: $('memoryAddHistoryBtn'), addKeyInfo: $('memoryAddKeyInfoBtn'), saveScene: $('memorySceneSaveBtn'), clearScene: $('memorySceneClearBtn'), analyzeButton: $('memoryAnalyzeBtn'),
+      candidateSheet: $('memoryCandidateSheet'), candidateBackdrop: document.querySelector('[data-memory-candidate-backdrop]'), candidateCloseButton: $('memoryCandidateCloseBtn'), candidateCenterButton: $('memoryCandidateCenterBtn'), candidateList: $('memoryCandidateList'),
+      promptBar: $('memoryPromptBar'), promptText: $('memoryPromptText'),
+      manualForms: {
+        history_event: { form: $('memoryAddHistoryForm'), input: $('memoryAddHistoryInput'), confirm: $('memoryAddHistoryConfirmBtn'), cancel: $('memoryAddHistoryCancelBtn') },
+        key_info: { form: $('memoryAddKeyInfoForm'), input: $('memoryAddKeyInfoInput'), confirm: $('memoryAddKeyInfoConfirmBtn'), cancel: $('memoryAddKeyInfoCancelBtn') }
+      },
+      traceOverlay: $('memoryTraceOverlay'), traceBackdrop: document.querySelector('[data-memory-trace-backdrop]'), traceCloseButton: $('memoryTraceCloseBtn'), traceTitle: $('memoryTraceTitle'), traceContent: $('memoryTraceContent'),
+      getSnapshot: function() { return state; },
+      findMessageNode: function(messageId) {
+        return Array.from(chatArea.querySelectorAll('[data-message-id]')).find(function(node) { return node.dataset.messageId === messageId; }) || null;
+      },
+      storageSize: $('memoryStorageSize'),
+      getStorageBytes: function() { return memoryStorage.estimateSerializedBytes({ settings: loadedCharacterSettings, messages: state.messages }); },
+      storageWarningOverlay: $('memoryStorageWarningOverlay'), storageWarningMessage: $('memoryStorageWarningMessage'), storageWarningCloseButton: $('memoryStorageWarningCloseBtn'), storageWarningExportButton: $('memoryStorageWarningExportBtn'), exportButton: $('exportBtn'), toast: $('memoryToast')
+    });
+    if (!memoryUI || typeof memoryUI.on !== 'function') throw new Error('Memory UI initialization failed');
+    memoryController = memoryNamespace.Controller.createMemoryController({
+      getState: function() { return state; },
+      save: saveCurrentCharacter,
+      getCharacterName: function() { return state.currentCharacter; },
+      loadCharacterSnapshot: loadCharacterSnapshotForAnalysis,
+      saveCharacterSnapshot: saveCharacterSnapshotForAnalysis,
+      getAnalysisConfig: function(snapshot) {
+        return { apiUrl: DEEPSEEK_API, apiKey: snapshot.apiKey, model: MODEL, fetchImpl: fetch };
+      },
+      ui: memoryUI,
+      now: function() { return new Date().toISOString(); }
+    });
+    ['sync', 'addMemory', 'updateMemory', 'deleteMemory', 'setMemoryStatus', 'togglePinned', 'patchScene', 'clearScene', 'confirmCandidate', 'dismissCandidate', 'dismissAllCandidates', 'analyzeRecent'].forEach(function(method) {
+      if (!memoryController || typeof memoryController[method] !== 'function') throw new Error('Memory controller initialization failed');
+    });
+  } catch (_) {
+    memoryFeatureAvailable = false;
+    memoryUI = { render: memoryNoopUI, openCenter: memoryNoopUI, closeCenter: memoryNoopUI, openCandidateSheet: memoryNoopUI, closeCandidateSheet: memoryNoopUI, openSource: memoryNoopUI, openTrace: memoryNoopUI, showAnalysisFailure: memoryNoopUI, showStorageWarning: memoryNoopUI, on: memoryNoopUI };
+    memoryController = { sync: function() {} };
+  }
+}
+if (memoryFeatureAvailable) {
+  memoryUI.on('addMemory', function(payload) { return memoryController.addMemory(payload); });
+  memoryUI.on('updateMemory', function(payload) { return memoryController.updateMemory(payload.id, payload.getPatch()); });
+  memoryUI.on('deleteMemory', function(payload) { return memoryController.deleteMemory(payload.id); });
+  memoryUI.on('setMemoryStatus', function(payload) { return memoryController.setMemoryStatus(payload.id, payload.status); });
+  memoryUI.on('togglePinned', function(payload) { return memoryController.togglePinned(payload.id); });
+  memoryUI.on('patchScene', function(patch) { return memoryController.patchScene(patch); });
+  memoryUI.on('clearScene', function() { return memoryController.clearScene(); });
+  memoryUI.on('candidate-confirm', function(payload) { return memoryController.confirmCandidate(payload.id, undefined, payload); });
+  memoryUI.on('candidate-edit', function(payload) { return memoryController.confirmCandidate(payload.id, payload.edited, payload); });
+  memoryUI.on('candidate-dismiss', function(payload) { return memoryController.dismissCandidate(payload.id, payload); });
+  memoryUI.on('candidate-dismiss-all', function(payload) { return memoryController.dismissAllCandidates(payload.ids, payload); });
+  memoryUI.on('manual-analyze', function() { return memoryController.analyzeRecent({ force: true }); });
+} else {
+  $('memoryCenterBtn').hidden = true;
+  $('memoryCenterBtn').disabled = true;
+  $('memoryPromptBar').hidden = true;
+  $('memoryAnalyzeBtn').disabled = true;
+  $('memoryCandidateSheet').hidden = true;
+  $('memoryCenterOverlay').hidden = true;
+  $('memoryTraceOverlay').hidden = true;
+  $('memoryStorageWarningOverlay').hidden = true;
+}
 
 /* ---- Persistence ---- */
 function getCharDataKey(name) {
@@ -357,39 +557,215 @@ function getCharacterList() {
   try { return JSON.parse(localStorage.getItem(LS.CHAR_LIST) || '[]'); } catch(e) { return []; }
 }
 function saveCharacterList(list) {
-  try { localStorage.setItem(LS.CHAR_LIST, JSON.stringify(list)); } catch(e) {}
+  try {
+    localStorage.setItem(LS.CHAR_LIST, JSON.stringify(list));
+    return { ok: true, rolledBack: true };
+  } catch(e) {
+    return {
+      ok: false,
+      rolledBack: true,
+      quotaExceeded: !!(typeof FonlingMemory !== 'undefined' && FonlingMemory.Storage && FonlingMemory.Storage.isQuotaExceededError && FonlingMemory.Storage.isQuotaExceededError(e))
+    };
+  }
 }
+function storageMutationResult(error, rolledBack) {
+  return {
+    ok: false,
+    rolledBack: rolledBack !== false,
+    quotaExceeded: !!(typeof FonlingMemory !== 'undefined' && FonlingMemory.Storage && FonlingMemory.Storage.isQuotaExceededError && FonlingMemory.Storage.isQuotaExceededError(error))
+  };
+}
+function updateCurrentCharacterSelection(name) {
+  try {
+    if (name) localStorage.setItem(LS.CURRENT_CHAR, name);
+    else localStorage.removeItem(LS.CURRENT_CHAR);
+    characterSelectionEpoch += 1;
+    return { ok: true, rolledBack: true };
+  } catch (error) {
+    return storageMutationResult(error, true);
+  }
+}
+function characterMutationIsBlocked() {
+  if (!state.isStreaming) return false;
+  addSystemMsg('⚠️ 回复生成中，请等待完成后再切换或修改角色', true);
+  return true;
+}
+var loadedCharacterSettings = {};
 function loadCharacterData(charName) {
-  if (!charName) return;
+  if (!charName) return false;
   try {
     var d = JSON.parse(localStorage.getItem(getCharDataKey(charName)) || '{}');
-    state.messages = JSON.parse(localStorage.getItem(getCharMsgKey(charName)) || '[]');
-    state.apiKey = d.apiKey || '';
-    state.systemPrompt = d.systemPrompt || '';
-    state.style = d.style || '';
-    state.userIdentity = d.userIdentity || '';
-    state.bgImage = d.bgImage || '';
-    state.historyEvents = Array.isArray(d.historyEvents) ? d.historyEvents : [];
-    state.keyInfo = Array.isArray(d.keyInfo) ? d.keyInfo : [];
-    state.roles = Array.isArray(d.roles) ? d.roles : [];
-    state.currentRole = d.currentRole || null;
-    state.currentState = d.currentState || '';
-    state.summary = d.summary || '';
-  } catch(e) { state.messages = []; }
+    var loadedMessages = JSON.parse(localStorage.getItem(getCharMsgKey(charName)) || '[]');
+    var migrated = FonlingMemory.Storage.migrateCharacterData(d, loadedMessages);
+    if (migrated.supported === false) return false;
+    d = migrated.settings;
+    var loadedState = {
+      currentCharacter: charName,
+      messages: migrated.messages,
+      apiKey: d.apiKey || '',
+      systemPrompt: d.systemPrompt || '',
+      style: d.style || '',
+      userIdentity: d.userIdentity || '',
+      bgImage: d.bgImage || '',
+      roles: Array.isArray(d.roles) ? d.roles : [],
+      currentRole: d.currentRole || null,
+      summary: d.summary || '',
+      memorySchemaVersion: d.memorySchemaVersion,
+      memories: d.memories,
+      currentScene: d.currentScene,
+      memoryCandidates: d.memoryCandidates,
+      memoryAnalysis: d.memoryAnalysis,
+      memoryRequestTraces: d.memoryRequestTraces,
+      isStreaming: false,
+      summarising: false
+    };
+    conversationRequestEpoch += 1;
+    summaryRequestEpoch += 1;
+    backgroundOperationEpoch += 1;
+    characterSelectionEpoch += 1;
+    loadedState.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
+    Object.assign(state, loadedState);
+    loadedCharacterSettings = JSON.parse(JSON.stringify(d));
+    if (migrated.changed) {
+      var migrationSaveResult = saveCurrentCharacter();
+      if (!migrationSaveResult || migrationSaveResult.ok !== true) reportSaveFailure(migrationSaveResult, {
+        restored: '记忆数据升级暂未保存，可继续使用，但请稍后重试。',
+        partial: '记忆数据升级保存失败，本地存储可能不完整，请立即导出备份。'
+      });
+    }
+    if (typeof memoryController !== 'undefined') memoryController.sync();
+    return true;
+  } catch(e) { return false; }
 }
 function saveCurrentCharacter() {
+  function saveResult(ok, rolledBack, error) {
+    var result = { ok: ok === true, rolledBack: rolledBack !== false };
+    var storage = typeof FonlingMemory !== 'undefined' && FonlingMemory.Storage;
+    if (ok !== true && storage && typeof storage.isQuotaExceededError === 'function' && storage.isQuotaExceededError(error)) {
+      try { Object.defineProperty(result, 'quotaExceeded', { value: true, enumerable: false }); }
+      catch (_) { result.quotaExceeded = true; }
+    }
+    return result;
+  }
   var name = state.currentCharacter;
-  if (!name) return;
+  if (!name) return saveResult(false, true);
+  var dataKey = getCharDataKey(name);
+  var messageKey = getCharMsgKey(name);
+  var previousDataRaw;
+  var previousMessagesRaw;
   try {
-    localStorage.setItem(getCharDataKey(name), JSON.stringify({
+    previousDataRaw = localStorage.getItem(dataKey);
+    previousMessagesRaw = localStorage.getItem(messageKey);
+    var settingsToSave = Object.assign({}, loadedCharacterSettings, {
       apiKey: state.apiKey, systemPrompt: state.systemPrompt, style: state.style,
       userIdentity: state.userIdentity, bgImage: state.bgImage,
-      historyEvents: state.historyEvents, keyInfo: state.keyInfo, roles: state.roles, currentRole: state.currentRole, currentState: state.currentState,
+      roles: state.roles, currentRole: state.currentRole,
       summary: state.summary
-    }));
-    localStorage.setItem(getCharMsgKey(name), JSON.stringify(state.messages));
+    }, FonlingMemory.Storage.serializeMemoryState(state));
+    localStorage.setItem(dataKey, JSON.stringify(settingsToSave));
+    localStorage.setItem(messageKey, JSON.stringify(state.messages));
+    loadedCharacterSettings = JSON.parse(JSON.stringify(settingsToSave));
+    return saveResult(true, true);
   } catch(e) {
-    addSystemMsg('⚠️ 存储空间不足，建议压缩背景图片或清理聊天记录', true);
+    try {
+      if (previousDataRaw === null) localStorage.removeItem(dataKey);
+      else if (previousDataRaw !== undefined) localStorage.setItem(dataKey, previousDataRaw);
+      if (previousMessagesRaw === null) localStorage.removeItem(messageKey);
+      else if (previousMessagesRaw !== undefined) localStorage.setItem(messageKey, previousMessagesRaw);
+    } catch (rollbackError) {
+      addSystemMsg('⚠️ 保存失败，且无法完整恢复本地存储，请立即导出备份', true);
+      return saveResult(false, false, e);
+    }
+    addSystemMsg(FonlingMemory.Storage.isQuotaExceededError && FonlingMemory.Storage.isQuotaExceededError(e)
+      ? '⚠️ 存储空间不足，请立即导出备份'
+      : '⚠️ 保存失败，原数据已恢复', true);
+    return saveResult(false, true, e);
+  }
+}
+
+function reportSaveFailure(result, fallback) {
+  var value = result && typeof result === 'object' ? result : { ok: false, rolledBack: false };
+  var messages = typeof fallback === 'string' ? { restored: fallback, partial: fallback } : (fallback || {});
+  var details = {
+    ok: false,
+    rolledBack: value.rolledBack !== false,
+    quotaExceeded: value.quotaExceeded === true,
+    message: value.quotaExceeded === true
+      ? '存储空间不足，请立即导出备份'
+      : (value.rolledBack === false
+        ? (messages.partial || '保存失败，本地存储可能不完整，请立即导出备份。')
+        : (messages.restored || '保存失败，原数据已恢复。'))
+  };
+  if (typeof memoryUI !== 'undefined' && memoryUI && typeof memoryUI.showStorageWarning === 'function') {
+    memoryUI.showStorageWarning(details);
+  }
+  return details;
+}
+
+function loadCharacterSnapshotForAnalysis(charName) {
+  if (!charName) return null;
+  try {
+    var rawSettings = JSON.parse(localStorage.getItem(getCharDataKey(charName)) || '{}');
+    var rawMessages = JSON.parse(localStorage.getItem(getCharMsgKey(charName)) || '[]');
+    var migrated = FonlingMemory.Storage.migrateCharacterData(rawSettings, rawMessages);
+    if (migrated.supported === false) return null;
+    return Object.assign({}, migrated.settings, {
+      currentCharacter: charName,
+      messages: migrated.messages,
+      memorySnapshotIdentity: state.currentCharacter === charName ? state.memorySnapshotIdentity || '' : ''
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveCharacterSnapshotForAnalysis(charName, snapshot) {
+  function saveResult(ok, rolledBack, error) {
+    var result = { ok: ok === true, rolledBack: rolledBack !== false };
+    var storage = typeof FonlingMemory !== 'undefined' && FonlingMemory.Storage;
+    if (ok !== true && storage && typeof storage.isQuotaExceededError === 'function' && storage.isQuotaExceededError(error)) {
+      try { Object.defineProperty(result, 'quotaExceeded', { value: true, enumerable: false }); }
+      catch (_) { result.quotaExceeded = true; }
+    }
+    return result;
+  }
+  if (!charName || !snapshot || typeof snapshot !== 'object') return saveResult(false, true);
+  var dataKey = getCharDataKey(charName);
+  var messageKey = getCharMsgKey(charName);
+  var previousDataRaw;
+  var previousMessagesRaw;
+  try {
+    previousDataRaw = localStorage.getItem(dataKey);
+    previousMessagesRaw = localStorage.getItem(messageKey);
+    var existingSettings = JSON.parse(previousDataRaw || '{}');
+    var settingsToSave = Object.assign({}, existingSettings, {
+      apiKey: snapshot.apiKey || '',
+      systemPrompt: snapshot.systemPrompt || '',
+      style: snapshot.style || '',
+      userIdentity: snapshot.userIdentity || '',
+      bgImage: snapshot.bgImage || '',
+      roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
+      currentRole: snapshot.currentRole || null,
+      summary: snapshot.summary || ''
+    }, FonlingMemory.Storage.serializeMemoryState(snapshot));
+    localStorage.setItem(dataKey, JSON.stringify(settingsToSave));
+    localStorage.setItem(messageKey, JSON.stringify(Array.isArray(snapshot.messages) ? snapshot.messages : []));
+    if (state.currentCharacter === charName) {
+      state.memoryCandidates = JSON.parse(JSON.stringify(snapshot.memoryCandidates || []));
+      state.memoryAnalysis = JSON.parse(JSON.stringify(snapshot.memoryAnalysis || { analyzedTurnKeys: [], lastFailure: null, activeCharacter: null }));
+      loadedCharacterSettings = JSON.parse(JSON.stringify(settingsToSave));
+    }
+    return saveResult(true, true);
+  } catch (saveError) {
+    try {
+      if (previousDataRaw === null) localStorage.removeItem(dataKey);
+      else if (previousDataRaw !== undefined) localStorage.setItem(dataKey, previousDataRaw);
+      if (previousMessagesRaw === null) localStorage.removeItem(messageKey);
+      else if (previousMessagesRaw !== undefined) localStorage.setItem(messageKey, previousMessagesRaw);
+      return saveResult(false, true, saveError);
+    } catch (rollbackError) {
+      return saveResult(false, false, saveError);
+    }
   }
 }
 
@@ -421,6 +797,7 @@ function renderMessages(scrollToBottom_) {
     const msg = state.messages[i];
     const wrap = document.createElement('div');
     if (msg._narration) { wrap.className = 'msg-wrap narration'; } else { wrap.className = 'msg-wrap ' + msg.role; }
+    if (msg.id) wrap.dataset.messageId = msg.id;
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     if (msg._streaming) bubble.classList.add('streaming');
@@ -454,6 +831,11 @@ function renderMessages(scrollToBottom_) {
         _b.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();backtrackMessage(idx);};}(i));
         _a.appendChild(_e); _a.appendChild(_r); _a.appendChild(_b);
       }
+      if (state.memoryRequestTraces && msg.id && state.memoryRequestTraces[msg.id]) {
+        var _t = document.createElement('button'); _t.className = 'msg-action-btn'; _t.textContent = '查看本次使用的记忆';
+        _t.addEventListener('click', function(messageId){return function(ev){ev.stopPropagation();memoryUI.openTrace(messageId);};}(msg.id));
+        _a.appendChild(_t);
+      }
       wrap.appendChild(_a);
       bubble.addEventListener('click', function(el){return function(ev){ev.stopPropagation();document.querySelectorAll('.msg-actions.show').forEach(function(x){if(x!==el)x.classList.remove('show')});el.classList.toggle('show')};}(_a));
     }
@@ -479,8 +861,28 @@ function startEdit(index) {
   btns.appendChild(cf); btns.appendChild(cn);
   ed.appendChild(ta); ed.appendChild(btns); wrap.appendChild(ed);
   ta.focus();
-  cf.addEventListener('click', function(idx,ta2){return function(ev){ev.stopPropagation();var v=ta2.value.trim();if(v){state.messages[idx].content=v;saveCurrentCharacter();renderMessages();}};}(index,ta));
+  cf.addEventListener('click', function(idx,ta2){return function(ev){ev.stopPropagation();commitMessageEdit(idx, ta2.value);};}(index,ta));
   cn.addEventListener('click', function(div){return function(ev){ev.stopPropagation();div.style.display='none';};}(ed));
+}
+function commitMessageEdit(index, newValue) {
+  if (index < 0 || index >= state.messages.length) return false;
+  var value = (newValue || '').trim();
+  if (!value) return false;
+  var previousContent = state.messages[index].content;
+  state.messages[index].content = value;
+  var saveResult;
+  try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
+  if (!saveResult || saveResult.ok !== true) {
+    state.messages[index].content = previousContent;
+    renderMessages();
+    reportSaveFailure(saveResult, {
+      restored: '消息编辑保存失败，原内容已恢复。',
+      partial: '消息编辑保存失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return false;
+  }
+  renderMessages();
+  return true;
 }
 function scrollToBottom() {
   requestAnimationFrame(function(){ chatArea.scrollTop = chatArea.scrollHeight; });
@@ -506,56 +908,52 @@ function finishStreamingBubble() {
 }
 
 /* ---- Build API Messages ---- */
-function buildApiMessages() {
-  const result = [];
-  // 历史事件（优先级高于记忆压缩）
-  for (let i = 0; i < state.historyEvents.length; i++) {
-    const ev = (state.historyEvents[i] || '').trim();
-    if (ev) {
-      result.push({ role: 'system', content: '历史事件' + (i+1) + '：' + ev });
-    }
-  }
-  // 当下状态
-  if (state.currentState) {
-    result.push({ role: 'system', content: '当前状态：' + state.currentState });
-  }
-  // 关键信息
-  for (let i = 0; i < state.keyInfo.length; i++) {
-    const ki = (state.keyInfo[i] || '').trim();
-    if (ki) {
-      result.push({ role: 'system', content: '关键信息' + (i+1) + '：' + ki });
+function buildApiMessages(options) {
+  var config = options || {};
+  var rawMessages = Array.isArray(state.messages) ? state.messages.filter(function(message) {
+    return message
+      && (message.role === 'user' || message.role === 'assistant')
+      && typeof message.content === 'string'
+      && message.content.trim().length > 0;
+  }) : [];
+  var userText = typeof config.userText === 'string' ? config.userText.trim() : '';
+  if (!userText) {
+    for (var userIndex = rawMessages.length - 1; userIndex >= 0; userIndex -= 1) {
+      if (rawMessages[userIndex].role === 'user') {
+        userText = rawMessages[userIndex].content.trim();
+        break;
+      }
     }
   }
 
-  if (state.systemPrompt) {
-    result.push({ role: 'system', content: state.systemPrompt }
-);
-  }
-  // 对话摘要（记忆压缩，优先级较低）
-  if (state.summary) {
-    result.push({ role: 'system', content: '以下是之前的对话摘要，请参考这些信息保持连续性：\n' + state.summary });
-  }
-  // 当前角色信息（覆盖用户身份优先级）
+  var selectedMemoryContext = FonlingMemory.Context.buildMemoryContextMessages({
+    memories: state.memories,
+    currentScene: state.currentScene,
+    userText: userText,
+    recentMessages: rawMessages.slice(-RECENT_KEEP)
+  });
+  var result = [];
+  if (state.systemPrompt) result.push({ role: 'system', content: state.systemPrompt });
   if (state.currentRole) {
     var roleText = getRoleSystemMsg();
-    if (roleText) { result.push({ role: 'system', content: roleText }); }
-  } else {
-    // 用户身份
-    if (state.userIdentity) {
-      result.push({ role: 'system', content: '用户身份：' + state.userIdentity });
-    }
+    if (roleText) result.push({ role: 'system', content: roleText });
+  } else if (state.userIdentity) {
+    result.push({ role: 'system', content: '用户身份：' + state.userIdentity });
   }
-  // 最近对话
-  const msgs = state.messages;
-  const recent = msgs.slice(-RECENT_KEEP);
-  for (let i = 0; i < recent.length; i++) {
-    result.push({ role: recent[i].role, content: recent[i].content });
-  }
-  // 风格指令
   if (state.style) {
     result.push({ role: 'system', content: '回复时请遵循以下风格要求：' + state.style });
   }
-  return result;
+  selectedMemoryContext.messages.forEach(function(message) { result.push(message); });
+  if (state.summary) {
+    result.push({ role: 'system', content: '以下是之前的对话摘要，请参考这些信息保持连续性：\n' + state.summary });
+  }
+  rawMessages.slice(-RECENT_KEEP).forEach(function(message) {
+    result.push({ role: message.role, content: message.content });
+  });
+  return {
+    messages: result,
+    memoryTrace: Object.assign({}, selectedMemoryContext.trace, { usedSummary: Boolean(state.summary) })
+  };
 }
 
 /* ---- Auto Summarize ---- */
@@ -563,8 +961,16 @@ async function autoSummarize() {
   if (state.summarising) return;
   if (state.messages.length <= MAX_MSG_BEFORE_SUMMARY) return;
   state.summarising = true;
+  var sourceCharacter = state.currentCharacter;
+  var requestEpoch = ++summaryRequestEpoch;
+  var baseSummary = state.summary;
+  function summaryRequestIsCurrent() {
+    return state.currentCharacter === sourceCharacter && summaryRequestEpoch === requestEpoch;
+  }
+  FonlingMemory.Model.ensureMessageIds(state.messages);
   const total = state.messages.length;
   const toSummarize = state.messages.slice(0, total - RECENT_KEEP);
+  const summarizedMessageIds = toSummarize.map(function(message) { return message && message.id; }).filter(Boolean);
   if (toSummarize.length < 4) { state.summarising = false; return; }
   const summaryPrompt = [
     {
@@ -590,24 +996,46 @@ async function autoSummarize() {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.apiKey },
       body: JSON.stringify({ model: MODEL, messages: summaryPrompt, stream: false, max_tokens: 1024 }),
     });
+    if (!summaryRequestIsCurrent()) { noteWrap.remove(); return; }
     if (!res.ok) { noteWrap.remove(); state.summarising = false; return; }
     const data = await res.json();
+    if (!summaryRequestIsCurrent()) { noteWrap.remove(); return; }
     const summary = data.choices?.[0]?.message?.content?.trim();
     if (summary) {
+      var liveMessageIds = new Set(state.messages.map(function(message) { return message && message.id; }).filter(Boolean));
+      if (state.summary !== baseSummary || summarizedMessageIds.some(function(id) { return !liveMessageIds.has(id); })) {
+        noteWrap.remove();
+        state.summarising = false;
+        return;
+      }
+      var previousSummary = state.summary;
+      var previousMessages = state.messages;
       state.summary = summary;
-      saveCurrentCharacter();
-      state.messages = state.messages.slice(-RECENT_KEEP);
-      saveCurrentCharacter();
+      var summarizedIdSet = new Set(summarizedMessageIds);
+      state.messages = state.messages.filter(function(message) { return !summarizedIdSet.has(message && message.id); });
+      var summarySaveResult;
+      try { summarySaveResult = saveCurrentCharacter(); } catch (saveError) { summarySaveResult = { ok: false, rolledBack: false }; }
+      if (!summarySaveResult || summarySaveResult.ok !== true) {
+        state.summary = previousSummary;
+        state.messages = previousMessages;
+        noteWrap.remove();
+        reportSaveFailure(summarySaveResult, {
+          restored: '历史记忆压缩保存失败，原聊天记录已恢复。',
+          partial: '历史记忆压缩保存失败，本地存储可能不完整，请立即导出备份。'
+        });
+        state.summarising = false;
+        return;
+      }
       noteWrap.querySelector('.bubble').textContent = '✅ 历史记忆已压缩，继续畅聊吧';
       var self = noteWrap;
-      setTimeout(function(){ self.remove(); renderMessages(); }, 1500);
+      setTimeout(function(){ self.remove(); if (summaryRequestIsCurrent()) renderMessages(); }, 1500);
     } else {
       noteWrap.remove();
     }
   } catch (e) {
     noteWrap.remove();
   }
-  state.summarising = false;
+  if (summaryRequestIsCurrent()) state.summarising = false;
 }
 
 /* ---- Send Message ---- */
@@ -654,6 +1082,100 @@ async function readSseContent(stream, onDelta) {
   return fullContent;
 }
 
+function captureConversationState() {
+  return {
+    messages: state.messages,
+    summary: state.summary,
+    memoryCandidates: state.memoryCandidates,
+    memoryAnalysis: state.memoryAnalysis,
+    memoryRequestTraces: state.memoryRequestTraces
+  };
+}
+
+function beginConversationRequest() {
+  conversationRequestEpoch += 1;
+  return { characterName: state.currentCharacter, epoch: conversationRequestEpoch };
+}
+
+function conversationRequestIsCurrent(request) {
+  return Boolean(request && request.characterName === state.currentCharacter && request.epoch === conversationRequestEpoch);
+}
+
+function finishConversationRequest(request, focusInput) {
+  if (!conversationRequestIsCurrent(request)) return false;
+  state.isStreaming = false;
+  sendBtn.disabled = false;
+  conversationRequestEpoch += 1;
+  if (focusInput && messageInput && typeof messageInput.focus === 'function') messageInput.focus();
+  return true;
+}
+
+function applyConversationState(next) {
+  state.messages = next.messages;
+  state.summary = next.summary;
+  state.memoryCandidates = next.memoryCandidates;
+  state.memoryAnalysis = next.memoryAnalysis;
+  state.memoryRequestTraces = next.memoryRequestTraces;
+}
+
+function conversationStateForMessages(messages, summary) {
+  return FonlingMemory.Model.removeArtifactsAfterMessageIds(
+    Object.assign({}, state, { messages: messages, summary: summary }),
+    messages.map(function(message) { return message && message.id; }).filter(Boolean)
+  );
+}
+
+function recordMemoryRequestTrace(existingTraces, assistantMessageId, trace, messages) {
+  var messageId = typeof assistantMessageId === 'string' ? assistantMessageId.trim() : '';
+  if (!messageId || !trace || typeof trace !== 'object') {
+    return existingTraces && typeof existingTraces === 'object' ? existingTraces : {};
+  }
+  var next = Object.assign({}, existingTraces || {});
+  next[messageId] = {
+    pinnedMemoryIds: Array.isArray(trace.pinnedMemoryIds) ? trace.pinnedMemoryIds.slice() : [],
+    relatedMemoryIds: Array.isArray(trace.relatedMemoryIds) ? trace.relatedMemoryIds.slice() : [],
+    sceneUpdatedAt: typeof trace.sceneUpdatedAt === 'string' ? trace.sceneUpdatedAt : '',
+    usedSummary: trace.usedSummary === true
+  };
+  var newestAssistantIds = (Array.isArray(messages) ? messages : [])
+    .filter(function(message) { return message && message.role === 'assistant' && typeof message.id === 'string' && message.id; })
+    .map(function(message) { return message.id; })
+    .slice(-50);
+  var bounded = {};
+  newestAssistantIds.forEach(function(id) {
+    if (Object.prototype.hasOwnProperty.call(next, id)) bounded[id] = next[id];
+  });
+  return bounded;
+}
+
+function persistFailedSend(previousConversationState, errorMessage, request) {
+  if (request && !conversationRequestIsCurrent(request)) return false;
+  var retainedMessages = state.messages.slice();
+  var lastMessage = retainedMessages[retainedMessages.length - 1];
+  if (lastMessage && lastMessage.role === 'assistant') retainedMessages.pop();
+  applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
+
+  var saveResult;
+  try {
+    saveResult = saveCurrentCharacter();
+  } catch (saveError) {
+    saveResult = { ok: false, rolledBack: false };
+  }
+  if (!saveResult || saveResult.ok !== true) {
+    applyConversationState(previousConversationState);
+    renderMessages();
+    reportSaveFailure(saveResult, {
+      restored: '消息保存失败，本次发送已恢复到发送前。',
+      partial: '消息保存失败，本地存储可能不完整，请立即导出备份。'
+    });
+    if (typeof memoryController !== 'undefined') memoryController.sync();
+  } else {
+    renderMessages();
+  }
+  addSystemMsg(errorMessage, true);
+  return saveResult && saveResult.ok === true;
+}
+
 /* ---- Send Message ---- */
 async function sendMessage() {
   const text = messageInput.value.trim();
@@ -666,51 +1188,112 @@ async function sendMessage() {
   messageInput.style.height = 'auto';
   sendBtn.disabled = true;
   state.isStreaming = true;
+  var request = beginConversationRequest();
   var isNarration = text.startsWith('/');
   var finalText = isNarration ? text.slice(1).trim() : text;
-  if (isNarration && !finalText) { state.isStreaming = false; sendBtn.disabled = false; return; }
-  state.messages.push({ role: 'user', content: finalText, _narration: isNarration || undefined, _roleName: state.currentRole || null });
-  saveCurrentCharacter();
+  if (isNarration && !finalText) { finishConversationRequest(request); return; }
+  var previousConversationState = captureConversationState();
+  var userMsg = {
+    id: FonlingMemory.Model.createId('message'),
+    role: 'user',
+    content: finalText,
+    _narration: isNarration || undefined,
+    _roleName: state.currentRole || null
+  };
+  var assistantMsg = {
+    id: FonlingMemory.Model.createId('message'),
+    role: 'assistant',
+    content: '',
+    _streaming: true
+  };
+  state.messages = state.messages.concat(userMsg, assistantMsg);
+  FonlingMemory.Model.ensureMessageIds(state.messages);
   renderMessages();
-  const assistantMsg = { role: 'assistant', content: '', _streaming: true };
-  state.messages.push(assistantMsg);
-  renderMessages();
-  const apiMessages = buildApiMessages();
+  var apiBuild;
+  try {
+    apiBuild = buildApiMessages({ userText: finalText });
+  } catch (contextError) {
+    if (!conversationRequestIsCurrent(request)) return;
+    applyConversationState(previousConversationState);
+    renderMessages();
+    addSystemMsg('⚠️ 记忆上下文无法构建：' + (contextError.code || contextError.message || '未知错误'), true);
+    finishConversationRequest(request);
+    return;
+  }
   try {
     const response = await fetch(DEEPSEEK_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.apiKey },
-      body: JSON.stringify({ model: MODEL, messages: apiMessages, stream: true, max_tokens: 4096 }),
+      body: JSON.stringify({ model: MODEL, messages: apiBuild.messages, stream: true, max_tokens: 4096 }),
     });
+    if (!conversationRequestIsCurrent(request)) return;
     if (!response.ok) {
       let errMsg = '请求失败 (' + response.status + ')';
       try { const errBody = await response.json(); errMsg = errBody.error?.message || errMsg; } catch(_) {}
-      state.messages.pop();
-      saveCurrentCharacter();
-      renderMessages();
-      addSystemMsg('❌ ' + errMsg, true);
-      state.isStreaming = false; sendBtn.disabled = false;
+      if (!conversationRequestIsCurrent(request)) return;
+      persistFailedSend(previousConversationState, '❌ ' + errMsg, request);
+      finishConversationRequest(request);
       return;
     }
     const fullContent = await readSseContent(response.body, function(_delta, content) {
+      if (!conversationRequestIsCurrent(request)) return;
       assistantMsg.content = content;
       updateStreamingBubble();
     });
+    if (!conversationRequestIsCurrent(request)) return;
+    if (typeof fullContent !== 'string' || !fullContent.trim()) {
+      persistFailedSend(previousConversationState, '❌ 未收到有效回复，请重试', request);
+      finishConversationRequest(request);
+      return;
+    }
     assistantMsg.content = fullContent;
     delete assistantMsg._streaming;
     finishStreamingBubble();
-    saveCurrentCharacter();
-    renderMessages();
-    if (state.messages.length > MAX_MSG_BEFORE_SUMMARY) { autoSummarize(); }
+    state.memoryRequestTraces = recordMemoryRequestTrace(
+      state.memoryRequestTraces,
+      assistantMsg.id,
+      apiBuild.memoryTrace,
+      state.messages
+    );
+    var sendSaveResult;
+    try { sendSaveResult = saveCurrentCharacter(); } catch (saveError) { sendSaveResult = { ok: false, rolledBack: false }; }
+    if (!sendSaveResult || sendSaveResult.ok !== true) {
+      applyConversationState(previousConversationState);
+      renderMessages();
+      reportSaveFailure(sendSaveResult, {
+        restored: '回复保存失败，本次对话已恢复到发送前。',
+        partial: '回复保存失败，本地存储可能不完整，请立即导出备份。'
+      });
+      if (typeof memoryController !== 'undefined') memoryController.sync();
+      finishConversationRequest(request); return;
+    }
+    if (typeof memoryController !== 'undefined' && typeof memoryController.considerTurn === 'function') {
+      memoryController.considerTurn({
+        characterName: state.currentCharacter,
+        userMessageId: userMsg.id,
+        assistantMessageId: assistantMsg.id
+      });
+    }
   } catch (e) {
-    state.messages.pop();
-    saveCurrentCharacter();
-    renderMessages();
-    addSystemMsg('❌ 网络错误：' + (e.message || '请检查网络连接'), true);
+    if (!conversationRequestIsCurrent(request)) return;
+    persistFailedSend(previousConversationState, '❌ 网络错误：' + (e.message || '请检查网络连接'), request);
+    finishConversationRequest(request, true);
+    return;
   }
-  state.isStreaming = false;
-  sendBtn.disabled = false;
-  messageInput.focus();
+  try {
+    renderMessages();
+    if (state.messages.length > MAX_MSG_BEFORE_SUMMARY) {
+      var summaryTask = autoSummarize();
+      if (summaryTask && typeof summaryTask.catch === 'function') {
+        summaryTask.catch(function() {
+          addSystemMsg('回复已保存但界面或后处理失败，请重新打开页面', true);
+        });
+      }
+    }
+  } catch (postCommitError) {
+    addSystemMsg('回复已保存但界面或后处理失败，请重新打开页面', true);
+  }
+  finishConversationRequest(request, true);
 }
 
 /* ---- Regenerate Message ---- */
@@ -726,41 +1309,104 @@ async function regenerateMessage() {
     if (state.messages[uj].role === 'user') { usrIdx = uj; break; }
   }
   if (usrIdx === -1) return;
-  state.messages.splice(aiIdx);
-  saveCurrentCharacter();
+  if (typeof memoryController !== 'undefined' && typeof memoryController.invalidateAnalysis === 'function') {
+    memoryController.invalidateAnalysis(state.currentCharacter);
+  }
+  var previousConversationState = captureConversationState();
+  var retainedMessages = state.messages.slice(0, aiIdx);
+  applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
   renderMessages();
   state.isStreaming = true;
   sendBtn.disabled = true;
-  var astMsg = { role: 'assistant', content: '', _streaming: true };
+  var request = beginConversationRequest();
+  var astMsg = { id: FonlingMemory.Model.createId('message'), role: 'assistant', content: '', _streaming: true };
   state.messages.push(astMsg);
+  FonlingMemory.Model.ensureMessageIds(state.messages);
   renderMessages();
-  var apiMessages = buildApiMessages();
+  var regenerateUserText = state.messages[usrIdx] && state.messages[usrIdx].role === 'user'
+    ? state.messages[usrIdx].content
+    : '';
+  var apiBuild;
+  try {
+    apiBuild = buildApiMessages({ userText: regenerateUserText });
+  } catch (contextError) {
+    if (!conversationRequestIsCurrent(request)) return;
+    applyConversationState(previousConversationState);
+    renderMessages();
+    addSystemMsg('⚠️ 记忆上下文无法构建：' + (contextError.code || contextError.message || '未知错误'), true);
+    finishConversationRequest(request);
+    return;
+  }
   try {
     var resp = await fetch(DEEPSEEK_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.apiKey },
-      body: JSON.stringify({ model: MODEL, messages: apiMessages, stream: true, max_tokens: 4096 }),
+      body: JSON.stringify({ model: MODEL, messages: apiBuild.messages, stream: true, max_tokens: 4096 }),
     });
+    if (!conversationRequestIsCurrent(request)) return;
     if (!resp.ok) {
-      state.messages.pop(); saveCurrentCharacter(); renderMessages();
+      applyConversationState(previousConversationState);
+      renderMessages();
       addSystemMsg('❌ 重说失败 (' + resp.status + ')', true);
-      state.isStreaming = false; sendBtn.disabled = false; return;
+      finishConversationRequest(request); return;
     }
     var fullContent = await readSseContent(resp.body, function(_delta, content) {
+      if (!conversationRequestIsCurrent(request)) return;
       astMsg.content = content;
       updateStreamingBubble();
     });
+    if (!conversationRequestIsCurrent(request)) return;
+    if (typeof fullContent !== 'string' || !fullContent.trim()) {
+      applyConversationState(previousConversationState);
+      renderMessages();
+      addSystemMsg('❌ 重说失败：未收到有效回复', true);
+      if (typeof memoryController !== 'undefined') memoryController.sync();
+      finishConversationRequest(request);
+      return;
+    }
     astMsg.content = fullContent;
     delete astMsg._streaming;
     finishStreamingBubble();
-    saveCurrentCharacter();
-    renderMessages();
+    state.memoryRequestTraces = recordMemoryRequestTrace(
+      state.memoryRequestTraces,
+      astMsg.id,
+      apiBuild.memoryTrace,
+      state.messages
+    );
+    var regenerateSaveResult;
+    try { regenerateSaveResult = saveCurrentCharacter(); } catch (saveError) { regenerateSaveResult = { ok: false, rolledBack: false }; }
+    if (!regenerateSaveResult || regenerateSaveResult.ok !== true) {
+      applyConversationState(previousConversationState);
+      renderMessages();
+      reportSaveFailure(regenerateSaveResult, {
+        restored: '重说保存失败，原回答已恢复。',
+        partial: '重说保存失败，本地存储可能不完整，请立即导出备份。'
+      });
+      if (typeof memoryController !== 'undefined') memoryController.sync();
+      finishConversationRequest(request); return;
+    }
+    if (typeof memoryController !== 'undefined' && typeof memoryController.considerTurn === 'function') {
+      memoryController.considerTurn({
+        characterName: state.currentCharacter,
+        userMessageId: state.messages[usrIdx].id,
+        assistantMessageId: astMsg.id
+      });
+    }
   } catch(e) {
-    state.messages.pop(); saveCurrentCharacter(); renderMessages();
+    if (!conversationRequestIsCurrent(request)) return;
+    applyConversationState(previousConversationState);
+    renderMessages();
     addSystemMsg('❌ 网络错误：' + (e.message || '请检查网络连接'), true);
+    finishConversationRequest(request);
+    return;
   }
-  state.isStreaming = false;
-  sendBtn.disabled = false;
+  try {
+    renderMessages();
+    if (typeof memoryController !== 'undefined') memoryController.sync();
+  } catch (uiError) {
+    addSystemMsg('回复已保存但界面刷新失败，请重新打开页面', true);
+  }
+  finishConversationRequest(request);
 }
 
 /* ---- Helpers ---- */
@@ -786,66 +1432,139 @@ function addSystemMsg(text, isError) {
   scrollToBottom();
 }
 
+function notifyMemoryUnavailableOnce() {
+  if (memoryFeatureAvailable || memoryUnavailableNoticeShown || !state.currentCharacter) return;
+  memoryUnavailableNoticeShown = true;
+  addSystemMsg('记忆功能暂不可用', true);
+}
+
 /* ---- Export / Import ---- */
+function buildExportData(sourceState, now) {
+  var suppliedNow = typeof now === 'function' ? now() : now;
+  var exportedAt;
+  if (typeof suppliedNow === 'string' && suppliedNow.trim()) {
+    exportedAt = suppliedNow;
+  } else {
+    var exportDate = suppliedNow instanceof Date ? suppliedNow : new Date(suppliedNow === undefined ? Date.now() : suppliedNow);
+    exportedAt = exportDate.toISOString();
+  }
+  var settings = {
+    apiKey: sourceState.apiKey,
+    systemPrompt: sourceState.systemPrompt,
+    style: sourceState.style,
+    bgImage: sourceState.bgImage,
+    summary: sourceState.summary,
+    roles: sourceState.roles,
+    currentRole: sourceState.currentRole,
+    userIdentity: sourceState.userIdentity
+  };
+  Object.assign(settings, FonlingMemory.Storage.serializeMemoryState(sourceState));
+  return JSON.parse(JSON.stringify({
+    schemaVersion: 2,
+    export_version: 2,
+    exported_at: exportedAt,
+    settings: settings,
+    messages: sourceState.messages
+  }));
+}
+
 function exportAllData() {
-  const data = {
-    export_version: 1,
-    exported_at: new Date().toISOString(),
-    settings: {
-     apiKey: state.apiKey,
-     systemPrompt: state.systemPrompt,
-     style: state.style,
-     bgImage: state.bgImage,
-     summary: state.summary,
-      roles: state.roles,
-      currentRole: state.currentRole,
-      keyInfo: state.keyInfo,
-      historyEvents: state.historyEvents,
-      currentState: state.currentState,
-      userIdentity: state.userIdentity,
-   },
-   messages: state.messages,
- };
+  const now = new Date();
+  const data = buildExportData(state, now);
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'ai-chat-backup-' + new Date().toISOString().slice(0,10) + '.json';
+  a.download = 'ai-chat-backup-' + data.exported_at.slice(0,10) + '.json';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
+function normalizeImportedCharacter(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('无效的配置文件格式');
+  if (Number(data.schemaVersion) > 2 || Number(data.export_version) > 2) throw new Error('不支持更高版本的备份文件');
+  if (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('无效的配置文件格式');
+  if (!Array.isArray(data.messages)) throw new Error('无效的消息列表');
+  var importedCopy = JSON.parse(JSON.stringify(data));
+  var migrated;
+  try {
+    migrated = FonlingMemory.Storage.migrateCharacterData(importedCopy.settings, importedCopy.messages);
+  } catch (error) {
+    throw new Error('导入数据无法迁移');
+  }
+  if (!migrated || migrated.supported === false) throw new Error('不支持更高版本的记忆数据');
+  return {
+    settings: migrated.settings,
+    messages: migrated.messages
+  };
+}
+
 function importData(file) {
+  if (characterMutationIsBlocked()) return;
+  var sourceCharacter = state.currentCharacter;
+  var sourceSelectionEpoch = characterSelectionEpoch;
   const reader = new FileReader();
   reader.onload = function(e) {
+    if (state.isStreaming || state.currentCharacter !== sourceCharacter || characterSelectionEpoch !== sourceSelectionEpoch) return;
     try {
       const data = JSON.parse(e.target.result);
-      if (!data.settings || !data.messages) { addSystemMsg('❌ 无效的配置文件格式', true); return; }
-      const s = data.settings;
-      state.apiKey = s.apiKey || '';
-      state.systemPrompt = s.systemPrompt || '';
-      state.style = s.style || '';
-      state.bgImage = s.bgImage || '';
-     state.summary = s.summary || '';
-      state.historyEvents = Array.isArray(s.historyEvents) ? s.historyEvents : [];
-      state.keyInfo = Array.isArray(s.keyInfo) ? s.keyInfo : [];
-      state.roles = Array.isArray(s.roles) ? s.roles : [];
-      state.currentRole = state.roles.some(function(role) { return role && role.name === s.currentRole; }) ? s.currentRole : null;
-      state.currentState = s.currentState || '';
-      state.userIdentity = s.userIdentity || '';
-     state.messages = Array.isArray(data.messages) ? data.messages : [];
-      saveCurrentCharacter();
-      saveCurrentCharacter();
-      syncSettingsUI();
-    updateIdentityBar();
-      applyBackground(state.bgImage);
-      renderMessages();
-      settingsOverlay.classList.remove('active');
+      const imported = normalizeImportedCharacter(data);
+      const s = imported.settings;
+      const importedRoles = Array.isArray(s.roles) ? s.roles : [];
+      const importedState = {
+        apiKey: s.apiKey || '',
+        systemPrompt: s.systemPrompt || '',
+        style: s.style || '',
+        bgImage: s.bgImage || '',
+        summary: s.summary || '',
+        roles: importedRoles,
+        currentRole: importedRoles.some(function(role) { return role && role.name === s.currentRole; }) ? s.currentRole : null,
+        userIdentity: s.userIdentity || '',
+        messages: imported.messages,
+        memorySchemaVersion: s.memorySchemaVersion,
+        memories: s.memories,
+        currentScene: s.currentScene,
+        memoryCandidates: s.memoryCandidates,
+        memoryAnalysis: s.memoryAnalysis,
+        memoryRequestTraces: s.memoryRequestTraces
+      };
+      importedState.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
+      s.currentRole = importedState.currentRole;
+      var previousState = JSON.parse(JSON.stringify(state));
+      var previousSettings = JSON.parse(JSON.stringify(loadedCharacterSettings));
+      loadedCharacterSettings = JSON.parse(JSON.stringify(s));
+      conversationRequestEpoch += 1;
+      summaryRequestEpoch += 1;
+      backgroundOperationEpoch += 1;
+      characterSelectionEpoch += 1;
+      Object.assign(state, importedState);
+      var saveResult = saveCurrentCharacter();
+      if (!saveResult.ok) {
+        Object.keys(state).forEach(function(key) { delete state[key]; });
+        Object.assign(state, previousState);
+        loadedCharacterSettings = previousSettings;
+        reportSaveFailure(saveResult, {
+          restored: '导入失败：无法保存数据，原数据已恢复。',
+          partial: '导入失败：本地存储可能部分更新，请立即导出备份并重新打开页面。'
+        });
+        return;
+      }
+      try {
+        syncSettingsUI();
+        updateIdentityBar();
+        applyBackground(state.bgImage);
+        renderMessages();
+        if (typeof memoryController !== 'undefined') memoryController.sync();
+        settingsOverlay.classList.remove('active');
+      } catch (uiError) {
+        addSystemMsg('导入成功但界面刷新失败，请重新打开页面', true);
+        return;
+      }
       addSystemMsg('✅ 配置已成功导入');
     } catch (err) {
-      addSystemMsg('❌ 导入失败：文件解析错误', true);
+      addSystemMsg('❌ 导入失败：文件格式或版本不受支持', true);
     }
   };
   reader.readAsText(file);
@@ -857,56 +1576,8 @@ function syncSettingsUI() {
   systemPromptInput.value = state.systemPrompt;
   styleInput.value = state.style;
   userIdentityInput.value = state.userIdentity;
-  currentStateInput.value = state.currentState;
-  renderHistoryEvents();
-  renderKeyInfo();
   renderRoles();
-}
-
-/* ---- Render History Events ---- */
-function renderHistoryEvents() {
-  historyEventsContainer.innerHTML = '';
-  for (let i = 0; i < state.historyEvents.length; i++) {
-    const div = document.createElement('div');
-    div.className = 'history-entry';
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = state.historyEvents[i] || '';
-    input.placeholder = '重要事件 ' + (i+1);
-    input.addEventListener('change', function(idx) {
-      return function() { state.historyEvents[idx] = this.value; saveCurrentCharacter(); };
-    }(i));
-    const delBtn = document.createElement('button');
-    delBtn.className = 'history-del-btn';
-    delBtn.textContent = '✕';
-    delBtn.addEventListener('click', function(idx) {
-      return function() { state.historyEvents.splice(idx, 1); saveCurrentCharacter(); renderHistoryEvents(); };
-    }(i));
-    div.appendChild(input);
-    div.appendChild(delBtn);
-    historyEventsContainer.appendChild(div);
-  }
-}
-function renderKeyInfo() {
-  var container = document.getElementById('keyInfoContainer');
-  if (!container) return;
-  container.innerHTML = '';
-  for (var i = 0; i < state.keyInfo.length; i++) {
-    var div = document.createElement('div');
-    div.className = 'history-entry';
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.value = state.keyInfo[i] || '';
-    input.placeholder = '关键信息 ' + (i+1);
-    (function(idx){input.addEventListener('change',function(){state.keyInfo[idx]=this.value;saveCurrentCharacter();});})(i);
-    var delBtn = document.createElement('button');
-    delBtn.className = 'history-del-btn';
-    delBtn.textContent = '✕';
-    (function(idx){delBtn.addEventListener('click',function(){state.keyInfo.splice(idx,1);saveCurrentCharacter();renderKeyInfo();});})(i);
-    div.appendChild(input);
-    div.appendChild(delBtn);
-    container.appendChild(div);
-  }
+  if (typeof memoryController !== 'undefined') memoryController.sync();
 }
 
 
@@ -936,55 +1607,166 @@ function renderCharacterList() {
   }
 }
 function loginCharacter(name) {
+  if (characterMutationIsBlocked()) return;
   var list = getCharacterList();
   if (list.indexOf(name) === -1) { addSystemMsg('❌ 角色 "'+name+'" 不存在', true); return; }
-  state.currentCharacter = name;
-  loadCharacterData(name);
-  localStorage.setItem(LS.CURRENT_CHAR, name);
+  var previousState = JSON.parse(JSON.stringify(state));
+  var previousSettings = JSON.parse(JSON.stringify(loadedCharacterSettings));
+  if (!loadCharacterData(name)) return;
+  var selectionResult = updateCurrentCharacterSelection(name);
+  if (!selectionResult || selectionResult.ok !== true) {
+    Object.keys(state).forEach(function(key) { delete state[key]; });
+    Object.assign(state, previousState);
+    loadedCharacterSettings = previousSettings;
+    if (typeof memoryController !== 'undefined') memoryController.sync();
+    reportSaveFailure(selectionResult, {
+      restored: '角色登录失败，原角色仍保持打开。',
+      partial: '角色登录失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
   hideLoginScreen();
   syncSettingsUI();
+  if (typeof memoryController !== 'undefined') memoryController.sync();
   applyBackground(state.bgImage);
   renderMessages();
   var d = document.getElementById('currentCharDisplay');
 if (d) d.textContent = name;
   document.querySelector('.ai-name').textContent = name;
   document.getElementById('settingsOverlay').classList.remove('active');
+  if (typeof notifyMemoryUnavailableOnce === 'function') notifyMemoryUnavailableOnce();
 }
 function createCharacter(name) {
+  if (characterMutationIsBlocked()) return;
   var t = name.trim();
   if (!t) { addSystemMsg('⚠️ 请输入角色名称', true); return; }
   var list = getCharacterList();
   if (list.indexOf(t) !== -1) { addSystemMsg('⚠️ 角色 "'+t+'" 已存在，请直接登录', true); return; }
+  var previousState = JSON.parse(JSON.stringify(state));
+  var previousSettings = JSON.parse(JSON.stringify(loadedCharacterSettings));
+  var previousList = list.slice();
   list.push(t);
-  saveCharacterList(list);
+  var listSaveResult = saveCharacterList(list);
+  if (!listSaveResult || listSaveResult.ok !== true) {
+    reportSaveFailure(listSaveResult, {
+      restored: '角色创建失败，角色列表未改变。',
+      partial: '角色创建失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
   state.currentCharacter = t;
+  loadedCharacterSettings = {};
   state.apiKey = ''; state.systemPrompt = ''; state.style = ''; state.userIdentity = '';
-  state.bgImage = ''; state.historyEvents = []; state.keyInfo = []; state.roles = []; state.currentRole = null; state.currentState = ''; state.summary = ''; state.messages = [];
-  saveCurrentCharacter();
-  localStorage.setItem(LS.CURRENT_CHAR, t);
+  state.bgImage = ''; state.roles = []; state.currentRole = null; state.summary = ''; state.messages = [];
+  Object.assign(state, FonlingMemory.Storage.createEmptyMemoryState());
+  state.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) {
+    Object.keys(state).forEach(function(key) { delete state[key]; });
+    Object.assign(state, previousState);
+    loadedCharacterSettings = previousSettings;
+    var listRollbackResult = saveCharacterList(previousList);
+    if (!listRollbackResult || listRollbackResult.ok !== true) {
+      try { Object.defineProperty(saveResult, 'rolledBack', { value: false, enumerable: true, configurable: true }); }
+      catch (_) { saveResult.rolledBack = false; }
+    }
+    syncSettingsUI();
+    applyBackground(state.bgImage);
+    renderMessages();
+    reportSaveFailure(saveResult, {
+      restored: '角色创建失败，原角色已恢复。',
+      partial: '角色创建失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
+  var selectionResult = updateCurrentCharacterSelection(t);
+  if (!selectionResult || selectionResult.ok !== true) {
+    var selectionRollbackOk = true;
+    try { localStorage.removeItem(getCharDataKey(t)); } catch (_) { selectionRollbackOk = false; }
+    try { localStorage.removeItem(getCharMsgKey(t)); } catch (_) { selectionRollbackOk = false; }
+    var rollbackListResult = saveCharacterList(previousList);
+    if (!rollbackListResult || rollbackListResult.ok !== true) selectionRollbackOk = false;
+    Object.keys(state).forEach(function(key) { delete state[key]; });
+    Object.assign(state, previousState);
+    loadedCharacterSettings = previousSettings;
+    if (!selectionRollbackOk) selectionResult.rolledBack = false;
+    reportSaveFailure(selectionResult, {
+      restored: '角色已创建但无法设为当前角色，本次创建已撤销。',
+      partial: '角色选择失败且无法完整恢复本地存储，请立即导出备份。'
+    });
+    return;
+  }
   hideLoginScreen();
   syncSettingsUI();
+  if (typeof memoryController !== 'undefined') memoryController.sync();
   applyBackground('');
   renderMessages();
   var d = document.getElementById('currentCharDisplay');
 if (d) d.textContent = t;
   document.querySelector('.ai-name').textContent = t;
   addSystemMsg('✅ 角色 "'+t+'" 创建成功');
+  if (typeof notifyMemoryUnavailableOnce === 'function') notifyMemoryUnavailableOnce();
 }
 function switchCharacter() {
-  saveCurrentCharacter();
-  localStorage.removeItem(LS.CURRENT_CHAR);
+  if (characterMutationIsBlocked()) return;
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) {
+    reportSaveFailure(saveResult, {
+      restored: '切换角色失败，当前角色仍保持打开。',
+      partial: '切换角色失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
+  var selectionResult = updateCurrentCharacterSelection('');
+  if (!selectionResult || selectionResult.ok !== true) {
+    reportSaveFailure(selectionResult, {
+      restored: '切换角色失败，当前角色仍保持打开。',
+      partial: '切换角色失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
+  loadedCharacterSettings = {};
   state.currentCharacter = '';
   showLoginScreen();
 }
 function deleteCharacter() {
+  if (characterMutationIsBlocked()) return;
   var name = state.currentCharacter;
   if (!name) return;
   if (!confirm('确定要永久删除角色 "'+name+'" 及其所有数据吗？此操作不可撤销！')) return;
-  try { localStorage.removeItem(getCharDataKey(name)); localStorage.removeItem(getCharMsgKey(name)); } catch(e) {}
+  var dataKey = getCharDataKey(name), messageKey = getCharMsgKey(name);
+  var keys = [dataKey, messageKey, LS.CHAR_LIST, LS.CURRENT_CHAR];
+  var previousRaw = {};
+  try { keys.forEach(function(key) { previousRaw[key] = localStorage.getItem(key); }); }
+  catch (readError) {
+    reportSaveFailure(storageMutationResult(readError, true), '删除角色失败，无法读取完整备份。');
+    return;
+  }
   var list = getCharacterList(), idx = list.indexOf(name);
-  if (idx !== -1) { list.splice(idx, 1); saveCharacterList(list); }
-  localStorage.removeItem(LS.CURRENT_CHAR);
+  if (idx !== -1) list.splice(idx, 1);
+  try {
+    localStorage.removeItem(dataKey);
+    localStorage.removeItem(messageKey);
+    localStorage.setItem(LS.CHAR_LIST, JSON.stringify(list));
+    localStorage.removeItem(LS.CURRENT_CHAR);
+  } catch (deleteError) {
+    var rollbackOk = true;
+    keys.forEach(function(key) {
+      try {
+        if (previousRaw[key] === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, previousRaw[key]);
+      } catch (_) { rollbackOk = false; }
+    });
+    reportSaveFailure(storageMutationResult(deleteError, rollbackOk), {
+      restored: '删除角色失败，原角色数据已恢复。',
+      partial: '删除角色失败且无法完整恢复本地存储，请立即导出备份。'
+    });
+    return;
+  }
+  backgroundOperationEpoch += 1;
+  conversationRequestEpoch += 1;
+  summaryRequestEpoch += 1;
+  characterSelectionEpoch += 1;
   state.currentCharacter = '';
   showLoginScreen();
 }
@@ -993,9 +1775,7 @@ function deleteCharacter() {
 function init() {
   var savedChar = localStorage.getItem(LS.CURRENT_CHAR);
   var list = getCharacterList();
-  if (savedChar && list.indexOf(savedChar) !== -1) {
-    state.currentCharacter = savedChar;
-    loadCharacterData(savedChar);
+  if (savedChar && list.indexOf(savedChar) !== -1 && loadCharacterData(savedChar)) {
     hideLoginScreen();
     applyBackground(state.bgImage);
     renderMessages();
@@ -1004,6 +1784,7 @@ function init() {
     var d = document.getElementById('currentCharDisplay');
 if (d) d.textContent = savedChar;
     document.querySelector('.ai-name').textContent = savedChar;
+    if (typeof notifyMemoryUnavailableOnce === 'function') notifyMemoryUnavailableOnce();
   } else {
     showLoginScreen();
   }
@@ -1020,37 +1801,91 @@ messageInput.addEventListener('input', function() {
 });
 
 $('settingsBtn').addEventListener('click', function() { settingsOverlay.classList.add('active'); });
+$('memoryCenterBtn').addEventListener('click', function() {
+  if (!memoryFeatureAvailable) return;
+  memoryController.sync();
+  memoryUI.openCenter();
+});
 $('closeSettingsBtn').addEventListener('click', function() { settingsOverlay.classList.remove('active'); });
 $('settingsOverlayBg').addEventListener('click', function() { settingsOverlay.classList.remove('active'); });
 
-apiKeyInput.addEventListener('change', function() { state.apiKey = this.value.trim(); saveCurrentCharacter(); });
-systemPromptInput.addEventListener('change', function() { state.systemPrompt = this.value.trim(); saveCurrentCharacter(); });
-styleInput.addEventListener('change', function() { state.style = this.value.trim(); saveCurrentCharacter(); });
-userIdentityInput.addEventListener('change', function() { state.userIdentity = this.value.trim(); saveCurrentCharacter(); });
+function saveSettingValue(key, input, value) {
+  var previousValue = state[key];
+  state[key] = value;
+  var saveResult;
+  try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
+  if (!saveResult || saveResult.ok !== true) {
+    state[key] = previousValue;
+    if (input) input.value = previousValue;
+    reportSaveFailure(saveResult, {
+      restored: '设置保存失败，原设置已恢复。',
+      partial: '设置保存失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return false;
+  }
+  return true;
+}
 
-currentStateInput.addEventListener('change', function() { state.currentState = this.value.trim(); saveCurrentCharacter(); });
-addEventBtn.addEventListener('click', function() { state.historyEvents.push(''); saveCurrentCharacter(); renderHistoryEvents(); });
+apiKeyInput.addEventListener('change', function() { saveSettingValue('apiKey', this, this.value.trim()); });
+systemPromptInput.addEventListener('change', function() { saveSettingValue('systemPrompt', this, this.value.trim()); });
+styleInput.addEventListener('change', function() { saveSettingValue('style', this, this.value.trim()); });
+userIdentityInput.addEventListener('change', function() { saveSettingValue('userIdentity', this, this.value.trim()); });
+
 $('bgUploadBtn').addEventListener('click', function() { bgFileInput.click(); });
 bgFileInput.addEventListener('change', function(e) {
   var file = e.target.files?.[0]; if (!file) return;
   if (!file.type.startsWith('image/')) { addSystemMsg('❌ 请选择图片文件', true); return; }
+  var sourceCharacter = state.currentCharacter;
+  var operationEpoch = ++backgroundOperationEpoch;
+  function backgroundOperationIsCurrent() {
+    return state.currentCharacter === sourceCharacter && backgroundOperationEpoch === operationEpoch;
+  }
   var reader = new FileReader();
   reader.onload = function(ev) {
+    if (!backgroundOperationIsCurrent()) return;
     var img = new Image();
     img.onload = function() {
+      if (!backgroundOperationIsCurrent()) return;
       var MAX = 800, w = img.width, h = img.height, r = Math.min(MAX/w, MAX/h, 1);
       w = Math.round(w*r); h = Math.round(h*r);
       var c = document.createElement('canvas'); c.width = w; c.height = h;
       c.getContext('2d').drawImage(img, 0, 0, w, h);
+      var previousBackground = state.bgImage;
       state.bgImage = c.toDataURL('image/jpeg', 0.7);
-      saveCurrentCharacter();
+      var saveResult;
+      try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
+      if (!saveResult || saveResult.ok !== true) {
+        state.bgImage = previousBackground;
+        applyBackground(previousBackground);
+        reportSaveFailure(saveResult, {
+          restored: '背景图片保存失败，原背景已恢复。',
+          partial: '背景图片保存失败，本地存储可能不完整，请立即导出备份。'
+        });
+        return;
+      }
       applyBackground(state.bgImage);
     };
     img.src = ev.target.result;
   };
   reader.readAsDataURL(file); bgFileInput.value = '';
 });
-$('bgResetBtn').addEventListener('click', function() { state.bgImage = ''; saveCurrentCharacter(); applyBackground(''); });
+$('bgResetBtn').addEventListener('click', function() {
+  backgroundOperationEpoch += 1;
+  var previousBackground = state.bgImage;
+  state.bgImage = '';
+  var saveResult;
+  try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
+  if (!saveResult || saveResult.ok !== true) {
+    state.bgImage = previousBackground;
+    applyBackground(previousBackground);
+    reportSaveFailure(saveResult, {
+      restored: '背景重置保存失败，原背景已恢复。',
+      partial: '背景重置保存失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
+  applyBackground('');
+});
 /* ---- Character System Event Listeners ---- */
 loginCharBtn.addEventListener('click', function() { loginCharacter(document.getElementById('charNameInput').value.trim()); });
 createCharBtn.addEventListener('click', function() { createCharacter(document.getElementById('charNameInput').value.trim()); });
@@ -1058,8 +1893,10 @@ document.getElementById('charNameInput').addEventListener('keydown', function(e)
 switchCharBtn.addEventListener('click', function() { switchCharacter(); });
 deleteCharBtn.addEventListener('click', function() { deleteCharacter(); });
 
-$('addKeyInfoBtn').addEventListener('click', function() { state.keyInfo.push(''); saveCurrentCharacter(); renderKeyInfo(); });
-$('addRoleBtn').addEventListener('click', function() {
+function addRole() {
+  if (characterMutationIsBlocked()) return;
+  var previousRoles = state.roles.slice();
+  var previousCurrentRole = state.currentRole;
   if (state.roles.length >= 8) { addSystemMsg('⚠️ 最多只能添加 8 个角色'); return; }
   var used = {};
   for (var ri = 0; ri < state.roles.length; ri++) { used[state.roles[ri].color] = true; }
@@ -1068,9 +1905,18 @@ $('addRoleBtn').addEventListener('click', function() {
     if (!used[PRESET_COLORS[ci]]) { nextColor = PRESET_COLORS[ci]; break; }
   }
   state.roles.push({ color: nextColor, name: '', bio: '' });
-  saveCurrentCharacter();
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) {
+    state.roles = previousRoles;
+    state.currentRole = previousCurrentRole;
+    reportSaveFailure(saveResult, {
+      restored: '添加身份失败，原角色列表已恢复。',
+      partial: '添加身份失败，本地存储可能不完整，请立即导出备份。'
+    });
+  }
   renderRoles();
-});
+}
+$('addRoleBtn').addEventListener('click', addRole);
 $('switchToMainBtn').addEventListener('click', function() { switchToMain(); });
 $('exportBtn').addEventListener('click', exportAllData);
 $('importBtn').addEventListener('click', function() { importFileInput.click(); });
@@ -1084,25 +1930,92 @@ importFileInput.addEventListener('change', function(e) {
 function backtrackMessage(idx) {
   if (idx < 0 || idx >= state.messages.length) return;
   if (!confirm('确认回溯到这条消息？此操作将删除之后的所有对话记录。')) return;
-  state.messages.splice(idx + 1);
-  state.summary = '';
-  saveCurrentCharacter();
+  var previousConversationState = captureConversationState();
+  var retainedMessages = state.messages.slice(0, idx + 1);
+  applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
+  var backtrackSaveResult;
+  try { backtrackSaveResult = saveCurrentCharacter(); } catch (error) { backtrackSaveResult = { ok: false, rolledBack: false }; }
+  if (!backtrackSaveResult || backtrackSaveResult.ok !== true) {
+    applyConversationState(previousConversationState);
+    reportSaveFailure(backtrackSaveResult, {
+      restored: '回溯失败，原聊天记录已恢复。',
+      partial: '回溯失败，本地存储可能不完整，请立即导出备份。'
+    });
+    if (typeof memoryController !== 'undefined') memoryController.sync();
+    return;
+  }
   renderMessages();
+  if (typeof memoryController !== 'undefined') memoryController.sync();
 }
 
 /* ---- Roles System ---- */
 function renameRole(index, newName) {
+  if (characterMutationIsBlocked()) return;
   var role = state.roles[index];
   if (!role) return;
   var oldName = role.name;
+  var oldCurrentRole = state.currentRole;
+  var renamedMessageIndexes = [];
   var updatedName = (newName || '').trim();
   role.name = updatedName;
   if (state.currentRole === oldName) state.currentRole = updatedName;
-  for (var i = 0; i < state.messages.length; i++) { if (state.messages[i]._roleName === oldName) state.messages[i]._roleName = updatedName; }
-  saveCurrentCharacter();
+  for (var i = 0; i < state.messages.length; i++) {
+    if (state.messages[i]._roleName === oldName) { renamedMessageIndexes.push(i); state.messages[i]._roleName = updatedName; }
+  }
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) {
+    role.name = oldName;
+    state.currentRole = oldCurrentRole;
+    for (var j = 0; j < renamedMessageIndexes.length; j++) state.messages[renamedMessageIndexes[j]]._roleName = oldName;
+    renderRoles();
+    renderMessages();
+    updateIdentityBar();
+    reportSaveFailure(saveResult, {
+      restored: '身份名称保存失败，原名称已恢复。',
+      partial: '身份名称保存失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
   renderRoles();
   renderMessages();
   updateIdentityBar();
+}
+function deleteRole(index) {
+  if (characterMutationIsBlocked()) return;
+  if (index < 0 || index >= state.roles.length) return;
+  var previousRoles = state.roles.slice();
+  var previousCurrentRole = state.currentRole;
+  if (state.currentRole === state.roles[index].name) state.currentRole = null;
+  state.roles.splice(index, 1);
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) {
+    state.roles = previousRoles;
+    state.currentRole = previousCurrentRole;
+    reportSaveFailure(saveResult, {
+      restored: '删除身份失败，原角色列表已恢复。',
+      partial: '删除身份失败，本地存储可能不完整，请立即导出备份。'
+    });
+  }
+  renderRoles();
+  renderMessages();
+  updateIdentityBar();
+  updateBubbleColor();
+}
+function updateRoleBio(index, newBio) {
+  if (characterMutationIsBlocked()) return;
+  var role = state.roles[index];
+  if (!role) return;
+  var oldBio = role.bio;
+  role.bio = (newBio || '').trim();
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) {
+    role.bio = oldBio;
+    reportSaveFailure(saveResult, {
+      restored: '身份简介保存失败，原简介已恢复。',
+      partial: '身份简介保存失败，本地存储可能不完整，请立即导出备份。'
+    });
+  }
+  renderRoles();
 }
 function renderRoles() {
   var container = document.getElementById('rolesContainer');
@@ -1134,22 +2047,34 @@ function renderRoles() {
     (function(n){sb.addEventListener('click',function(){switchToRole(n);});})(role.name);
     var db = document.createElement('button'); db.className = 'history-del-btn'; db.textContent = '✕';
     db.style.flexShrink = '0';
-    (function(idx){db.addEventListener('click',function(){if(state.currentRole===state.roles[idx].name)state.currentRole=null;state.roles.splice(idx,1);saveCurrentCharacter();renderRoles();renderMessages();});})(i);
+    (function(idx){db.addEventListener('click',function(){deleteRole(idx);});})(i);
     r1.appendChild(sw); r1.appendChild(ni); r1.appendChild(sb); r1.appendChild(db);
     card.appendChild(r1);
     var bi = document.createElement('input');
     bi.type = "text"; bi.value = role.bio || ""; bi.placeholder = "角色简介";
     bi.style.cssText = 'width:100%;padding:6px 10px;border:1px solid #444;border-radius:6px;background:#1a1a1a;color:#e0e0e0;font-size:14px';
-    (function(idx){bi.addEventListener('change',function(){state.roles[idx].bio=this.value.trim();saveCurrentCharacter();});})(i);
+    (function(idx){bi.addEventListener('change',function(){updateRoleBio(idx,this.value);});})(i);
     card.appendChild(bi);
     container.appendChild(card);
   }
 }
 function switchToRole(name) {
+  if (characterMutationIsBlocked()) return;
   for (var i = 0; i < state.roles.length; i++) {
     if (state.roles[i].name === name) {
+      var previousRole = state.currentRole;
       state.currentRole = name;
-      saveCurrentCharacter();
+      var saveResult = saveCurrentCharacter();
+      if (!saveResult || saveResult.ok !== true) {
+        state.currentRole = previousRole;
+        renderRoles();
+        updateIdentityBar();
+        reportSaveFailure(saveResult, {
+          restored: '切换身份失败，原身份已恢复。',
+          partial: '切换身份失败，本地存储可能不完整，请立即导出备份。'
+        });
+        return;
+      }
       updateBubbleColor();
       renderRoles();
       updateIdentityBar();
@@ -1158,8 +2083,20 @@ function switchToRole(name) {
   }
 }
 function switchToMain() {
+  if (characterMutationIsBlocked()) return;
+  var previousRole = state.currentRole;
   state.currentRole = null;
-  saveCurrentCharacter();
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) {
+    state.currentRole = previousRole;
+    renderRoles();
+    updateIdentityBar();
+    reportSaveFailure(saveResult, {
+      restored: '切换身份失败，原身份已恢复。',
+      partial: '切换身份失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
   renderRoles();
   renderMessages();
   updateIdentityBar();
@@ -1191,12 +2128,44 @@ function getRoleSystemMsg() {
 }
 
 $('clearChatBtn').addEventListener('click', function() {
-  if (state.messages.length === 0) return;
+  var analysis = state.memoryAnalysis || {};
+  var hasDerivedMemory = (state.memoryCandidates || []).length > 0
+    || (analysis.analyzedTurnKeys || []).length > 0
+    || analysis.lastFailure !== null && analysis.lastFailure !== undefined
+    || analysis.activeCharacter !== null && analysis.activeCharacter !== undefined
+    || Object.keys(state.memoryRequestTraces || {}).length > 0;
+  if (state.messages.length === 0 && !state.summary && !hasDerivedMemory) return;
   if (!confirm('确定要清空所有聊天记录吗？此操作不可撤销。')) return;
-  state.messages = [];
-  state.summary = '';
-  saveCurrentCharacter();
+  var previousConversationState = {
+    messages: state.messages,
+    summary: state.summary,
+    memoryCandidates: state.memoryCandidates,
+    memoryAnalysis: state.memoryAnalysis,
+    memoryRequestTraces: state.memoryRequestTraces
+  };
+  var clearedConversationState = FonlingMemory.Model.clearConversationMemoryArtifacts(state);
+  state.messages = clearedConversationState.messages;
+  state.summary = clearedConversationState.summary;
+  state.memoryCandidates = clearedConversationState.memoryCandidates;
+  state.memoryAnalysis = clearedConversationState.memoryAnalysis;
+  state.memoryRequestTraces = clearedConversationState.memoryRequestTraces;
+  var saveResult;
+  try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
+  if (!saveResult || saveResult.ok !== true) {
+    state.messages = previousConversationState.messages;
+    state.summary = previousConversationState.summary;
+    state.memoryCandidates = previousConversationState.memoryCandidates;
+    state.memoryAnalysis = previousConversationState.memoryAnalysis;
+    state.memoryRequestTraces = previousConversationState.memoryRequestTraces;
+    reportSaveFailure(saveResult, {
+      restored: '清空失败，原聊天记录已恢复。',
+      partial: '清空失败，本地存储可能不完整，请立即导出备份。'
+    });
+    if (typeof memoryController !== 'undefined') memoryController.sync();
+    return;
+  }
   renderMessages();
+  if (typeof memoryController !== 'undefined') memoryController.sync();
 });
 
 document.addEventListener('DOMContentLoaded', init);

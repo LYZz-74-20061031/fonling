@@ -19,10 +19,11 @@ function loadRenameRole(currentRole) {
   };
   const context = {
     state,
-    saveCurrentCharacter() { calls.push('save'); },
+    saveCurrentCharacter() { calls.push('save'); return { ok: true, rolledBack: true }; },
     renderRoles() { calls.push('roles'); },
     renderMessages() { calls.push('messages'); },
     updateIdentityBar() { calls.push('identity'); },
+    characterMutationIsBlocked() { return false; },
   };
   vm.runInNewContext(`${fn}; this.renameRole = renameRole;`, context);
   return { ...context, calls };
