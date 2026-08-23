@@ -176,6 +176,7 @@ textarea{resize:none}
 .cancel-edit{background:transparent;border:1px solid #555;color:#aaa}
 .confirm-edit:active,.cancel-edit:active{opacity:.7}
 </style>
+<link rel="stylesheet" href="css/settings.css">
 </head>
 <body>
 
@@ -202,15 +203,101 @@ textarea{resize:none}
   </footer>
 </div>
 
-<div id="settingsOverlay">
+<div id="settingsOverlay" aria-hidden="true">
   <div class="overlay-bg" id="settingsOverlayBg"></div>
-  <div id="settingsPanel">
+  <div id="settingsPanel" role="dialog" aria-modal="true" aria-labelledby="settingsPanelTitle">
     <div class="settings-header">
-      <h2>设置</h2>
-      <button id="closeSettingsBtn" aria-label="关闭">✕</button>
+      <button id="settingsBackBtn" type="button" aria-label="返回设置首页" hidden>返回</button>
+      <h2 id="settingsPanelTitle">设置</h2>
+      <button id="closeSettingsBtn" type="button">完成</button>
     </div>
     <div class="settings-body">
-      <section class="model-settings-card" aria-labelledby="modelSettingsTitle">
+      <section class="settings-view settings-home" data-settings-view="home">
+        <section class="settings-character-card" aria-label="当前角色">
+          <div class="settings-character-backdrop" id="settingsCharacterBackdrop" aria-hidden="true"></div>
+          <div class="settings-character-shade" aria-hidden="true"></div>
+          <div class="settings-character-copy">
+            <span class="settings-eyebrow">当前角色</span>
+            <strong id="currentCharDisplay">未登录</strong>
+            <span id="settingsChapterDisplay">当前章节：无</span>
+          </div>
+        </section>
+
+        <nav class="settings-route-list" aria-label="设置分类">
+          <button type="button" class="settings-route" data-settings-route="character">
+            <span><strong>角色设定</strong><small>人设、世界观、回复风格</small></span><em>进入</em>
+          </button>
+          <button type="button" class="settings-route" data-settings-route="identity">
+            <span><strong>主控与身份</strong><small id="settingsIdentityDetail">主控身份、暂无切换身份</small></span><em>进入</em>
+          </button>
+          <button type="button" class="settings-route" data-settings-route="chapter-memory">
+            <span><strong>章节与记忆</strong><small id="settingsChapterDetail">章节、摘要与长期记忆</small></span><em>进入</em>
+            <i id="settingsSummaryDot" class="settings-summary-dot" aria-hidden="true" hidden></i>
+          </button>
+          <button type="button" class="settings-route" data-settings-route="model">
+            <span><strong>模型与连接</strong><small id="settingsModelDetail">GLM 免费模型、DeepSeek 备用</small></span><em>进入</em>
+          </button>
+          <button type="button" class="settings-route" data-settings-route="data">
+            <span><strong>数据、外观与安全</strong><small>背景、导入导出、清空与删除</small></span><em>进入</em>
+          </button>
+        </nav>
+      </section>
+
+      <section class="settings-view" data-settings-view="character" hidden>
+        <div class="settings-section-intro">
+          <span class="settings-eyebrow">角色设定</span>
+          <h3>让角色始终保持一致</h3>
+          <p>长文本会在独立编辑页中完整展开，保存后立即用于下一轮对话。</p>
+        </div>
+        <div class="settings-group">
+          <button type="button" class="settings-text-entry" data-settings-editor="systemPrompt" data-editor-title="AI 人设与世界观">
+            <span><strong>AI 人设与世界观</strong><small id="systemPromptPreview">尚未填写</small></span><em>编辑</em>
+          </button>
+          <button type="button" class="settings-text-entry" data-settings-editor="style" data-editor-title="回复风格指令">
+            <span><strong>回复风格指令</strong><small id="stylePreview">尚未填写</small></span><em>编辑</em>
+          </button>
+        </div>
+        <textarea id="systemPromptInput" class="settings-field-source" aria-hidden="true" tabindex="-1"></textarea>
+        <textarea id="styleInput" class="settings-field-source" aria-hidden="true" tabindex="-1"></textarea>
+      </section>
+
+      <section class="settings-view" data-settings-view="identity" hidden>
+        <div class="settings-section-intro">
+          <span class="settings-eyebrow">主控与身份</span>
+          <h3>决定你以谁的身份进入故事</h3>
+          <p>主控资料会作为长期背景；切换身份会同步改变署名和气泡颜色。</p>
+        </div>
+        <div class="settings-group">
+          <button type="button" class="settings-text-entry" data-settings-editor="userIdentity" data-editor-title="主控身份">
+            <span><strong>主控身份</strong><small id="userIdentityPreview">尚未填写</small></span><em>编辑</em>
+          </button>
+        </div>
+        <textarea id="userIdentityInput" class="settings-field-source" aria-hidden="true" tabindex="-1"></textarea>
+        <div class="settings-subheading"><span>切换身份</span><small>共用同一条剧情线</small></div>
+        <div id="rolesContainer"></div>
+        <button class="btn-block btn-outline" id="addRoleBtn">添加身份</button>
+        <div class="spacer"></div>
+        <button class="btn-block btn-primary" id="switchToMainBtn">回到主控身份</button>
+      </section>
+
+      <section class="settings-view" data-settings-view="chapter-memory" hidden>
+        <div class="settings-section-intro">
+          <span class="settings-eyebrow">章节与记忆</span>
+          <h3>整理剧情，但不打断聊天</h3>
+          <p>章节保留原文，确认后的章节摘要与长期记忆一起进入后续上下文。</p>
+        </div>
+        <div class="settings-action-card">
+          <div><strong>章节管理</strong><small id="settingsChapterManagerDetail">当前章节：无</small></div>
+          <button class="settings-action-button" id="chapterManagerBtn">打开</button>
+        </div>
+        <div class="settings-action-card">
+          <div><strong>记忆中心</strong><small>历史事件、关键信息与当前场景</small></div>
+          <button class="settings-action-button" id="memoryCenterBtn">打开</button>
+        </div>
+      </section>
+
+      <section class="settings-view" data-settings-view="model" hidden>
+        <section class="model-settings-card" aria-labelledby="modelSettingsTitle">
         <h3 id="modelSettingsTitle">模型服务（全局）</h3>
         <p class="model-settings-scope">对所有智能体生效，不随角色 JSON 导入或导出。</p>
 
@@ -251,68 +338,69 @@ textarea{resize:none}
           </div>
         </details>
       </section>
+      </section>
 
-      <hr>
-      <span class="label">当前角色</span>
-      <span id="currentCharDisplay" style="color:var(--primary);font-size:15px;font-weight:500">未登录</span>
-      <div class="spacer"></div>
-      <button class="btn-block btn-outline" id="switchCharBtn">切换角色</button>
-      <div class="spacer"></div>
-      <button class="btn-block btn-danger" id="deleteCharBtn">删除此角色</button>
-      <hr>
- 
-      <span class="label">AI 人设与世界观</span>
-      <span class="desc">在这里写入你想让 AI 扮演的角色和世界设定，实时生效</span>
-      <textarea id="systemPromptInput" rows="5" placeholder="例如：你是修仙界的师姐，说话带古风，语气温柔但偶尔毒舌…"></textarea>
-
-      <span class="label">回复风格指令</span>
-      <span class="desc">额外要求，如「用毒舌吐槽风格」「用温柔文艺风格」等</span>
-     <input type="text" id="styleInput" placeholder="例：用毒舌吐槽风格">
-      
-      <span class="label">我是谁</span>
-      <span class="desc">告诉 AI 你的身份信息，作为全局记忆</span>
-      <textarea id="userIdentityInput" rows="3" placeholder="例如：我是李明，28岁，软件工程师，正在准备考研…"></textarea>
-
-      <div class="spacer"></div>
-      <span class="desc">历史事件、关键信息和当前场景在记忆中心统一管理。</span>
-      <button class="btn-block btn-primary" id="memoryCenterBtn">记忆中心</button>
-
-      <div class="spacer"></div>
-      <span class="label">章节</span>
-      <span class="desc">章节是可选的剧情整理工具，可保存原文并生成长期摘要。</span>
-      <button class="btn-block btn-outline" id="chapterManagerBtn">章节管理</button>
-
-      <div class="spacer"></div>
-      <span class="label">角色（切换身份）</span>
-      <span class="desc">创建角色身份，切换后以该角色身份与AI对话，气泡颜色同步变化</span>
-      <div id="rolesContainer"></div>
-      <div class="spacer"></div>
-      <button class="btn-block btn-outline" id="addRoleBtn">+ 添加角色</button>
-      <div class="spacer"></div>
-      <button class="btn-block btn-primary" id="switchToMainBtn">回到主控身份</button>
-
-      <span class="label">聊天背景</span>
-      <span class="desc">从相册选择图片作为聊天背景，关闭页面后依然保留</span>
-      <div class="spacer"></div>
-      <button class="btn-block btn-upload" id="bgUploadBtn">📷 上传背景图</button>
-      <input type="file" id="bgFileInput" accept="image/*" hidden>
-      <div class="spacer"></div>
-      <button class="btn-block btn-outline" id="bgResetBtn">重置默认背景</button>
-
-      <hr>
-
-      <span class="label">数据迁移</span>
-      <span class="desc">导出所有配置为 JSON 文件，方便换机备份</span>
-      <div class="spacer"></div>
-      <button class="btn-block btn-primary" id="exportBtn">📤 导出所有配置</button>
-      <div class="spacer"></div>
-      <button class="btn-block btn-outline" id="importBtn">📥 导入配置</button>
-      <input type="file" id="importFileInput" accept=".json" hidden>
-
-      <hr>
-
-      <button class="btn-block btn-danger" id="clearChatBtn">🗑 清空聊天记录</button>
+      <section class="settings-view" data-settings-view="data" hidden>
+        <div class="settings-section-intro">
+          <span class="settings-eyebrow">数据、外观与安全</span>
+          <h3>本机数据与角色管理</h3>
+          <p>聊天内容和密钥仅保存在当前浏览器。进行清理前建议先导出备份。</p>
+        </div>
+        <div class="settings-subheading"><span>聊天背景</span><small>从相册选择并保存在本机</small></div>
+        <button class="btn-block btn-upload" id="bgUploadBtn">上传背景图</button>
+        <input type="file" id="bgFileInput" accept="image/*" hidden>
+        <div class="spacer"></div>
+        <button class="btn-block btn-outline" id="bgResetBtn">重置默认背景</button>
+        <div class="spacer"></div>
+        <button class="btn-block btn-outline" id="bgCardFocusBtn" disabled>调整卡片取景</button>
+        <div class="settings-subheading"><span>备份与迁移</span><small>一份 JSON 对应一个智能体</small></div>
+        <button class="btn-block btn-primary" id="exportBtn">导出当前角色</button>
+        <div class="spacer"></div>
+        <button class="btn-block btn-outline" id="importBtn">导入角色配置</button>
+        <input type="file" id="importFileInput" accept=".json" hidden>
+        <div class="settings-subheading settings-danger-heading"><span>角色与剧情</span><small>以下操作可能无法撤销</small></div>
+        <button class="btn-block btn-outline" id="switchCharBtn">切换角色</button>
+        <div class="spacer"></div>
+        <button class="btn-block btn-danger" id="clearChatBtn">清空全部剧情与记忆</button>
+        <div class="spacer"></div>
+        <button class="btn-block btn-danger" id="deleteCharBtn">删除此角色</button>
+      </section>
     </div>
+
+    <section id="settingsTextEditor" class="settings-text-editor" aria-hidden="true" hidden data-unsaved-message="有未保存的修改，确定放弃吗？">
+      <header>
+        <button id="settingsEditorCancelBtn" type="button">取消</button>
+        <div><h3 id="settingsEditorTitle">编辑</h3><span id="settingsEditorDirty" hidden>未保存</span></div>
+        <button id="settingsEditorSaveBtn" type="button">保存</button>
+      </header>
+      <div class="settings-editor-body">
+        <textarea id="settingsEditorTextarea" aria-labelledby="settingsEditorTitle" placeholder="在这里输入完整内容"></textarea>
+        <p>内容会完整保存在本机，并在保存后用于下一轮对话。</p>
+      </div>
+    </section>
+
+    <section id="settingsBackgroundFocusEditor" class="settings-focus-editor" aria-hidden="true" hidden>
+      <header>
+        <button id="settingsFocusCancelBtn" type="button">取消</button>
+        <div><h3>卡片取景</h3><span id="settingsFocusDirty" hidden>未保存</span></div>
+        <button id="settingsFocusSaveBtn" type="button" disabled>保存</button>
+      </header>
+      <div class="settings-focus-body">
+        <p class="settings-focus-lead">拖动图片，让人物出现在合适的位置。聊天背景不会改变。</p>
+        <div id="settingsFocusPreview" class="settings-focus-preview" tabindex="0" aria-label="拖动调整卡片取景">
+          <img id="settingsFocusImage" alt="当前角色背景取景预览" draggable="false">
+          <div class="settings-focus-copy" aria-hidden="true"><span>当前角色</span><strong id="settingsFocusCharacterName">角色</strong></div>
+          <span id="settingsFocusLoading" class="settings-focus-loading" role="status">正在载入背景…</span>
+        </div>
+        <div class="settings-focus-controls">
+          <label for="settingsFocusX"><span>水平位置</span><output id="settingsFocusXValue">50%</output></label>
+          <input id="settingsFocusX" type="range" min="0" max="100" step="1" value="50">
+          <label for="settingsFocusY"><span>垂直位置</span><output id="settingsFocusYValue">35%</output></label>
+          <input id="settingsFocusY" type="range" min="0" max="100" step="1" value="35">
+        </div>
+        <button id="settingsFocusResetBtn" class="btn-block btn-outline" type="button">重置取景</button>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -414,6 +502,7 @@ textarea{resize:none}
 <script src="js/chapter/chapter-context.js"></script>
 <script src="js/chapter/chapter-controller.js"></script>
 <script src="js/chapter/chapter-ui.js"></script>
+<script src="js/settings/settings-ui.js"></script>
 <script src="js/memory/memory-model.js"></script>
 <script src="js/memory/memory-storage.js"></script>
 <script src="js/memory/memory-context.js"></script>
@@ -485,6 +574,7 @@ let state = {
    systemPrompt: '',
    style: '',
    bgImage: '',
+   bgCardFocus: { x: 50, y: 35 },
    messages: [],
    summary: '',
   chapterSchemaVersion: 1,
@@ -514,10 +604,16 @@ let chapterSummaryEpoch = 0;
 let chapterSummaryRequestEpochs = {};
 
 const $ = id => document.getElementById(id);
+function normalizeBackgroundFocus(value) { return FonlingSettings.normalizeBackgroundFocus(value); }
  const chatArea = $('chatArea');
  const messageInput = $('messageInput');
  const sendBtn = $('sendBtn');
  const settingsOverlay = $('settingsOverlay');
+ const settingsNavigator = FonlingSettings.createNavigator(['home', 'character', 'identity', 'chapter-memory', 'model', 'data']);
+ let settingsFocusState = {
+   open: false, loaded: false, original: normalizeBackgroundFocus(), draft: normalizeBackgroundFocus(),
+   metrics: FonlingSettings.getCoverMetrics(), pointer: null
+ };
  const glmApiKeyInput = $('glmApiKeyInput');
  const deepseekApiKeyInput = $('deepseekApiKeyInput');
  const defaultProviderSelect = $('defaultProviderSelect');
@@ -711,6 +807,7 @@ function updateChapterStatus() {
   if (!node) return;
   var text = chapterNamespace.UI.statusText(state);
   node.textContent = text; node.title = text; node.setAttribute('aria-label', text);
+  syncSettingsOverview();
 }
 var chapterController = chapterNamespace.Controller.createChapterController({
   getState: function() { return state; },
@@ -886,6 +983,7 @@ function loadCharacterData(charName) {
       style: d.style || '',
       userIdentity: d.userIdentity || '',
       bgImage: d.bgImage || '',
+      bgCardFocus: normalizeBackgroundFocus(d.bgCardFocus),
       roles: Array.isArray(d.roles) ? d.roles : [],
       currentRole: d.currentRole || null,
       summary: d.summary || '',
@@ -943,6 +1041,7 @@ function saveCurrentCharacter() {
     var settingsToSave = Object.assign({}, loadedCharacterSettings, {
       systemPrompt: state.systemPrompt, style: state.style,
       userIdentity: state.userIdentity, bgImage: state.bgImage,
+      bgCardFocus: normalizeBackgroundFocus(state.bgCardFocus),
       roles: state.roles, currentRole: state.currentRole,
       summary: state.summary
     }, FonlingMemory.Storage.serializeMemoryState(state), chapterStorage.serializeChapterState(state));
@@ -1028,6 +1127,7 @@ function saveCharacterSnapshotForAnalysis(charName, snapshot) {
       style: snapshot.style || '',
       userIdentity: snapshot.userIdentity || '',
       bgImage: snapshot.bgImage || '',
+      bgCardFocus: normalizeBackgroundFocus(snapshot.bgCardFocus),
       roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
       currentRole: snapshot.currentRole || null,
       summary: snapshot.summary || ''
@@ -1145,6 +1245,7 @@ function applyBackground(url) {
     chatArea.style.backgroundImage = '';
     chatArea.style.backgroundColor = '#ededed';
   }
+  syncSettingsOverview();
 }
 
 /* ---- Render Messages ---- */
@@ -2011,6 +2112,7 @@ function buildExportData(sourceState, now) {
     systemPrompt: sourceState.systemPrompt,
     style: sourceState.style,
     bgImage: sourceState.bgImage,
+    bgCardFocus: normalizeBackgroundFocus(sourceState.bgCardFocus),
     summary: sourceState.summary,
     roles: sourceState.roles,
     currentRole: sourceState.currentRole,
@@ -2080,6 +2182,7 @@ function importData(file) {
         systemPrompt: s.systemPrompt || '',
         style: s.style || '',
         bgImage: s.bgImage || '',
+        bgCardFocus: normalizeBackgroundFocus(s.bgCardFocus),
         summary: s.summary || '',
         chapterSchemaVersion: s.chapterSchemaVersion,
         chapters: s.chapters,
@@ -2141,7 +2244,7 @@ function importData(file) {
         applyBackground(state.bgImage);
         renderMessages();
         if (typeof memoryController !== 'undefined') memoryController.sync();
-        settingsOverlay.classList.remove('active');
+        closeSettings();
       } catch (uiError) {
         addSystemMsg('导入成功但界面刷新失败，请重新打开页面', true);
         return;
@@ -2165,7 +2268,216 @@ function syncSettingsUI() {
   styleInput.value = state.style;
   userIdentityInput.value = state.userIdentity;
   renderRoles();
+  syncSettingsOverview();
   if (typeof memoryController !== 'undefined') memoryController.sync();
+}
+
+function settingsPreview(value, emptyText) {
+  var text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  if (!text) return emptyText || '尚未填写';
+  return text.length > 72 ? text.slice(0, 72) + '…' : text;
+}
+
+function syncSettingsOverview() {
+  if (typeof FonlingSettings === 'undefined') return;
+  var overview = FonlingSettings.getOverview(state);
+  var character = $('currentCharDisplay');
+  if (character) character.textContent = overview.characterName;
+  var chapter = $('settingsChapterDisplay');
+  if (chapter) chapter.textContent = overview.chapterText;
+  var managerDetail = $('settingsChapterManagerDetail');
+  if (managerDetail) managerDetail.textContent = overview.chapterText;
+  var identity = $('settingsIdentityDetail');
+  if (identity) identity.textContent = overview.identityDetail;
+  var chapterDetail = $('settingsChapterDetail');
+  if (chapterDetail) chapterDetail.textContent = overview.chapterDetail;
+  var summaryDot = $('settingsSummaryDot');
+  if (summaryDot) summaryDot.hidden = overview.pendingSummaryCount === 0;
+  var backdrop = $('settingsCharacterBackdrop');
+  var focus = normalizeBackgroundFocus(state.bgCardFocus);
+  if (backdrop) {
+    backdrop.style.backgroundImage = state.bgImage ? 'url(' + JSON.stringify(state.bgImage) + ')' : 'none';
+    backdrop.style.backgroundPosition = focus.x + '% ' + focus.y + '%';
+  }
+  var focusButton = $('bgCardFocusBtn');
+  if (focusButton) focusButton.disabled = !state.bgImage;
+  var personaPreview = $('systemPromptPreview');
+  if (personaPreview) personaPreview.textContent = settingsPreview(state.systemPrompt, '填写角色、人设和世界观');
+  var stylePreview = $('stylePreview');
+  if (stylePreview) stylePreview.textContent = settingsPreview(state.style, '填写叙述语气和回复偏好');
+  var identityPreview = $('userIdentityPreview');
+  if (identityPreview) identityPreview.textContent = settingsPreview(state.userIdentity, '填写主控的身份背景');
+  var modelDetail = $('settingsModelDetail');
+  if (modelDetail) {
+    var glmTest = modelConfig.connectionTests && modelConfig.connectionTests.glm;
+    modelDetail.textContent = glmTest && glmTest.status === 'success'
+      ? 'GLM 已连接、DeepSeek 备用'
+      : 'GLM 免费模型、DeepSeek 备用';
+  }
+}
+
+function renderSettingsView() {
+  var current = settingsNavigator.currentView();
+  document.querySelectorAll('[data-settings-view]').forEach(function(view) {
+    view.hidden = view.dataset.settingsView !== current;
+  });
+  $('settingsBackBtn').hidden = current === 'home';
+  $('settingsPanelTitle').textContent = {
+    home: '设置', character: '角色设定', identity: '主控与身份',
+    'chapter-memory': '章节与记忆', model: '模型与连接', data: '数据与安全'
+  }[current] || '设置';
+  var body = settingsOverlay.querySelector('.settings-body');
+  if (body) body.scrollTop = 0;
+}
+
+function openSettingsView(name) {
+  if (!settingsNavigator.openView(name)) return false;
+  syncSettingsOverview();
+  renderSettingsView();
+  return true;
+}
+
+function openSettings() {
+  settingsNavigator.goHome();
+  syncSettingsUI();
+  renderSettingsView();
+  settingsOverlay.classList.add('active');
+  settingsOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function closeSettings() {
+  if (settingsFocusState.open && !closeBackgroundFocusEditor()) return false;
+  var editor = settingsNavigator.editor();
+  if (editor.open && !closeSettingsEditor()) return false;
+  settingsOverlay.classList.remove('active');
+  settingsOverlay.setAttribute('aria-hidden', 'true');
+  settingsNavigator.goHome();
+  renderSettingsView();
+  return true;
+}
+
+function openSettingsEditor(key, title) {
+  var input = { systemPrompt: systemPromptInput, style: styleInput, userIdentity: userIdentityInput }[key];
+  if (!input) return;
+  settingsNavigator.beginEdit({ key: key, title: title, value: input.value || '' });
+  $('settingsEditorTitle').textContent = title;
+  $('settingsEditorTextarea').value = input.value || '';
+  $('settingsEditorDirty').hidden = true;
+  $('settingsTextEditor').hidden = false;
+  $('settingsTextEditor').setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(function() { $('settingsEditorTextarea').focus(); });
+}
+
+function hideSettingsEditor() {
+  $('settingsTextEditor').hidden = true;
+  $('settingsTextEditor').setAttribute('aria-hidden', 'true');
+  $('settingsEditorTextarea').value = '';
+  $('settingsEditorDirty').hidden = true;
+}
+
+function closeSettingsEditor() {
+  var canClose = settingsNavigator.canCloseEditor(function() {
+    return confirm('有未保存的修改，确定放弃吗？');
+  });
+  if (!canClose) return false;
+  hideSettingsEditor();
+  return true;
+}
+
+function saveSettingsEditor() {
+  var editor = settingsNavigator.editor();
+  if (!editor.open) return;
+  var input = { systemPrompt: systemPromptInput, style: styleInput, userIdentity: userIdentityInput }[editor.key];
+  if (!input) return;
+  var nextValue = $('settingsEditorTextarea').value.trim();
+  if (!saveSettingValue(editor.key, input, nextValue)) return;
+  settingsNavigator.commitEditor();
+  hideSettingsEditor();
+  syncSettingsOverview();
+}
+
+function backgroundFocusIsDirty() {
+  return settingsFocusState.draft.x !== settingsFocusState.original.x
+    || settingsFocusState.draft.y !== settingsFocusState.original.y;
+}
+
+function renderBackgroundFocusDraft() {
+  var preview = $('settingsFocusPreview');
+  var image = $('settingsFocusImage');
+  if (!preview || !image || !settingsFocusState.loaded) return;
+  var rect = preview.getBoundingClientRect();
+  settingsFocusState.metrics = FonlingSettings.getCoverMetrics({
+    imageWidth: image.naturalWidth,
+    imageHeight: image.naturalHeight,
+    frameWidth: rect.width,
+    frameHeight: rect.height
+  });
+  var metrics = settingsFocusState.metrics;
+  var focus = normalizeBackgroundFocus(settingsFocusState.draft);
+  settingsFocusState.draft = focus;
+  image.style.width = metrics.renderedWidth + 'px';
+  image.style.height = metrics.renderedHeight + 'px';
+  image.style.left = -(metrics.overflowX * focus.x / 100) + 'px';
+  image.style.top = -(metrics.overflowY * focus.y / 100) + 'px';
+  $('settingsFocusX').value = String(Math.round(focus.x));
+  $('settingsFocusY').value = String(Math.round(focus.y));
+  $('settingsFocusX').disabled = metrics.overflowX === 0;
+  $('settingsFocusY').disabled = metrics.overflowY === 0;
+  $('settingsFocusXValue').textContent = Math.round(focus.x) + '%';
+  $('settingsFocusYValue').textContent = Math.round(focus.y) + '%';
+  $('settingsFocusDirty').hidden = !backgroundFocusIsDirty();
+}
+
+function openBackgroundFocusEditor() {
+  if (!state.bgImage) return;
+  var focus = normalizeBackgroundFocus(state.bgCardFocus);
+  settingsFocusState = {
+    open: true, loaded: false, original: focus, draft: Object.assign({}, focus),
+    metrics: FonlingSettings.getCoverMetrics(), pointer: null
+  };
+  $('settingsFocusCharacterName').textContent = state.currentCharacter || '当前角色';
+  $('settingsFocusLoading').hidden = false;
+  $('settingsFocusLoading').textContent = '正在载入背景…';
+  $('settingsFocusSaveBtn').disabled = true;
+  $('settingsFocusDirty').hidden = true;
+  $('settingsBackgroundFocusEditor').hidden = false;
+  $('settingsBackgroundFocusEditor').setAttribute('aria-hidden', 'false');
+  var image = $('settingsFocusImage');
+  image.removeAttribute('src');
+  image.src = state.bgImage;
+}
+
+function hideBackgroundFocusEditor() {
+  settingsFocusState.open = false;
+  settingsFocusState.pointer = null;
+  $('settingsFocusPreview').classList.remove('dragging');
+  $('settingsBackgroundFocusEditor').hidden = true;
+  $('settingsBackgroundFocusEditor').setAttribute('aria-hidden', 'true');
+}
+
+function closeBackgroundFocusEditor() {
+  if (!settingsFocusState.open) return true;
+  if (backgroundFocusIsDirty() && !confirm('有未保存的取景修改，确定放弃吗？')) return false;
+  hideBackgroundFocusEditor();
+  return true;
+}
+
+function saveBackgroundFocusEditor() {
+  if (!settingsFocusState.open || !settingsFocusState.loaded) return;
+  var previousFocus = normalizeBackgroundFocus(state.bgCardFocus);
+  state.bgCardFocus = normalizeBackgroundFocus(settingsFocusState.draft);
+  var saveResult;
+  try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
+  if (!saveResult || saveResult.ok !== true) {
+    state.bgCardFocus = previousFocus;
+    reportSaveFailure(saveResult, {
+      restored: '卡片取景保存失败，原取景已恢复。',
+      partial: '卡片取景保存失败，本地存储可能不完整，请立即导出备份。'
+    });
+    return;
+  }
+  hideBackgroundFocusEditor();
+  syncSettingsOverview();
 }
 
 function connectionStatusText(status) {
@@ -2250,7 +2562,7 @@ function loginCharacter(name) {
   var d = document.getElementById('currentCharDisplay');
 if (d) d.textContent = name;
   document.querySelector('.ai-name').textContent = name;
-  document.getElementById('settingsOverlay').classList.remove('active');
+  closeSettings();
   if (typeof notifyMemoryUnavailableOnce === 'function') notifyMemoryUnavailableOnce();
 }
 function createCharacter(name) {
@@ -2275,7 +2587,7 @@ function createCharacter(name) {
   loadedCharacterSettings = {};
   delete state.apiKey;
   state.systemPrompt = ''; state.style = ''; state.userIdentity = '';
-  state.bgImage = ''; state.roles = []; state.currentRole = null; state.summary = ''; state.messages = [];
+  state.bgImage = ''; state.bgCardFocus = normalizeBackgroundFocus(); state.roles = []; state.currentRole = null; state.summary = ''; state.messages = [];
   Object.assign(state, chapterModel.createEmptyState());
   Object.assign(state, FonlingMemory.Storage.createEmptyMemoryState());
   state.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
@@ -2423,14 +2735,103 @@ messageInput.addEventListener('input', function() {
   this.style.height = Math.min(this.scrollHeight, 120) + 'px';
 });
 
-$('settingsBtn').addEventListener('click', function() { settingsOverlay.classList.add('active'); });
+$('settingsBtn').addEventListener('click', openSettings);
+$('settingsBackBtn').addEventListener('click', function() {
+  settingsNavigator.goHome();
+  renderSettingsView();
+});
+document.querySelectorAll('[data-settings-route]').forEach(function(button) {
+  button.addEventListener('click', function() { openSettingsView(button.dataset.settingsRoute); });
+});
+document.querySelectorAll('[data-settings-editor]').forEach(function(button) {
+  button.addEventListener('click', function() {
+    openSettingsEditor(button.dataset.settingsEditor, button.dataset.editorTitle || '编辑');
+  });
+});
+$('settingsEditorTextarea').addEventListener('input', function() {
+  var editor = settingsNavigator.updateDraft(this.value);
+  $('settingsEditorDirty').hidden = !editor.dirty;
+});
+$('settingsEditorCancelBtn').addEventListener('click', closeSettingsEditor);
+$('settingsEditorSaveBtn').addEventListener('click', saveSettingsEditor);
+$('bgCardFocusBtn').addEventListener('click', openBackgroundFocusEditor);
+$('settingsFocusCancelBtn').addEventListener('click', closeBackgroundFocusEditor);
+$('settingsFocusSaveBtn').addEventListener('click', saveBackgroundFocusEditor);
+$('settingsFocusResetBtn').addEventListener('click', function() {
+  settingsFocusState.draft = normalizeBackgroundFocus();
+  renderBackgroundFocusDraft();
+});
+$('settingsFocusImage').addEventListener('load', function() {
+  if (!settingsFocusState.open) return;
+  settingsFocusState.loaded = true;
+  $('settingsFocusLoading').hidden = true;
+  $('settingsFocusSaveBtn').disabled = false;
+  requestAnimationFrame(renderBackgroundFocusDraft);
+});
+$('settingsFocusImage').addEventListener('error', function() {
+  settingsFocusState.loaded = false;
+  $('settingsFocusLoading').hidden = false;
+  $('settingsFocusLoading').textContent = '背景载入失败，请取消后重新选择图片';
+  $('settingsFocusSaveBtn').disabled = true;
+});
+['settingsFocusX', 'settingsFocusY'].forEach(function(id) {
+  $(id).addEventListener('input', function() {
+    var next = Object.assign({}, settingsFocusState.draft);
+    if (id === 'settingsFocusX') next.x = Number(this.value);
+    else next.y = Number(this.value);
+    settingsFocusState.draft = normalizeBackgroundFocus(next);
+    renderBackgroundFocusDraft();
+  });
+});
+$('settingsFocusPreview').addEventListener('pointerdown', function(event) {
+  if (!settingsFocusState.loaded) return;
+  settingsFocusState.pointer = {
+    id: event.pointerId, x: event.clientX, y: event.clientY,
+    focus: Object.assign({}, settingsFocusState.draft)
+  };
+  this.classList.add('dragging');
+  if (this.setPointerCapture) this.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+$('settingsFocusPreview').addEventListener('pointermove', function(event) {
+  var pointer = settingsFocusState.pointer;
+  if (!pointer || pointer.id !== event.pointerId) return;
+  settingsFocusState.draft = FonlingSettings.focusAfterDrag({
+    focus: pointer.focus,
+    deltaX: event.clientX - pointer.x,
+    deltaY: event.clientY - pointer.y,
+    metrics: settingsFocusState.metrics
+  });
+  renderBackgroundFocusDraft();
+  event.preventDefault();
+});
+function finishBackgroundFocusPointer(event) {
+  var pointer = settingsFocusState.pointer;
+  if (!pointer || pointer.id !== event.pointerId) return;
+  settingsFocusState.pointer = null;
+  $('settingsFocusPreview').classList.remove('dragging');
+}
+$('settingsFocusPreview').addEventListener('pointerup', finishBackgroundFocusPointer);
+$('settingsFocusPreview').addEventListener('pointercancel', finishBackgroundFocusPointer);
+window.addEventListener('resize', function() {
+  if (settingsFocusState.open && settingsFocusState.loaded) requestAnimationFrame(renderBackgroundFocusDraft);
+});
 $('memoryCenterBtn').addEventListener('click', function() {
   if (!memoryFeatureAvailable) return;
   memoryController.sync();
   memoryUI.openCenter();
 });
-$('closeSettingsBtn').addEventListener('click', function() { settingsOverlay.classList.remove('active'); });
-$('settingsOverlayBg').addEventListener('click', function() { settingsOverlay.classList.remove('active'); });
+$('closeSettingsBtn').addEventListener('click', closeSettings);
+$('settingsOverlayBg').addEventListener('click', closeSettings);
+document.addEventListener('keydown', function(event) {
+  if (event.key !== 'Escape' || !settingsOverlay.classList.contains('active')) return;
+  if (settingsFocusState.open) closeBackgroundFocusEditor();
+  else if (settingsNavigator.editor().open) closeSettingsEditor();
+  else if (settingsNavigator.currentView() !== 'home') {
+    settingsNavigator.goHome();
+    renderSettingsView();
+  } else closeSettings();
+});
 
 function saveSettingValue(key, input, value) {
   var previousValue = state[key];
@@ -2562,11 +2963,14 @@ bgFileInput.addEventListener('change', function(e) {
       var c = document.createElement('canvas'); c.width = w; c.height = h;
       c.getContext('2d').drawImage(img, 0, 0, w, h);
       var previousBackground = state.bgImage;
+      var previousBackgroundFocus = normalizeBackgroundFocus(state.bgCardFocus);
       state.bgImage = c.toDataURL('image/jpeg', 0.7);
+      state.bgCardFocus = normalizeBackgroundFocus();
       var saveResult;
       try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
       if (!saveResult || saveResult.ok !== true) {
         state.bgImage = previousBackground;
+        state.bgCardFocus = previousBackgroundFocus;
         applyBackground(previousBackground);
         reportSaveFailure(saveResult, {
           restored: '背景图片保存失败，原背景已恢复。',
@@ -2583,11 +2987,14 @@ bgFileInput.addEventListener('change', function(e) {
 $('bgResetBtn').addEventListener('click', function() {
   backgroundOperationEpoch += 1;
   var previousBackground = state.bgImage;
+  var previousBackgroundFocus = normalizeBackgroundFocus(state.bgCardFocus);
   state.bgImage = '';
+  state.bgCardFocus = normalizeBackgroundFocus();
   var saveResult;
   try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
   if (!saveResult || saveResult.ok !== true) {
     state.bgImage = previousBackground;
+    state.bgCardFocus = previousBackgroundFocus;
     applyBackground(previousBackground);
     reportSaveFailure(saveResult, {
       restored: '背景重置保存失败，原背景已恢复。',
@@ -2776,6 +3183,7 @@ function renderRoles() {
     card.appendChild(bi);
     container.appendChild(card);
   }
+  syncSettingsOverview();
 }
 function switchToRole(name) {
   if (characterMutationIsBlocked()) return;
