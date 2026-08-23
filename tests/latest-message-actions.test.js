@@ -107,10 +107,13 @@ function createRegenerateHarness(options = {}) {
     reportSaveFailure() {},
     updateModelStatusBar() {},
   };
+  const persistedSnapshot = JSON.parse(JSON.stringify(sandbox.state));
+  sandbox.loadCharacterSnapshotForAnalysis = () => JSON.parse(JSON.stringify(persistedSnapshot));
   loadMemoryModel(sandbox);
   for (const name of [
     'captureConversationState',
     'applyConversationState',
+    'restoreConversationAfterSaveFailure',
     'conversationStateForMessages',
     'recordMemoryRequestTrace',
     'beginConversationRequest',

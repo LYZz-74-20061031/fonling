@@ -485,7 +485,20 @@
       appendTraceSection('固定记忆', resolveContents(trace.pinnedMemoryIds));
       appendTraceSection('相关记忆', resolveContents(trace.relatedMemoryIds));
       appendTraceSection('当前场景', trace.sceneUpdatedAt ? [`场景版本：${trace.sceneUpdatedAt}；${formatSceneForTrace(live.currentScene) || '当前场景为空'}`] : []);
-      appendTraceSection('摘要使用', [trace.usedSummary ? '滚动摘要：已使用' : '滚动摘要：未使用']);
+      const chapters = Array.isArray(live.chapters) ? live.chapters : [];
+      const chapterById = new Map(chapters.filter(Boolean).map(chapter => [chapter.id, chapter]));
+      const chapterSummaries = (Array.isArray(trace.chapterSummaryIds) ? trace.chapterSummaryIds : []).map(function(id) {
+        const chapter = chapterById.get(id);
+        if (!chapter) return `章节摘要已不存在（${id}）`;
+        const confirmed = chapter.summary && typeof chapter.summary.confirmedText === 'string' ? chapter.summary.confirmedText.trim() : '';
+        const rolling = typeof chapter.rollingSummary === 'string' ? chapter.rollingSummary.trim() : '';
+        return `《${chapter.name || '未命名章节'}》：${confirmed || rolling || '使用了近期章节原文'}`;
+      });
+      appendTraceSection('章节摘要', chapterSummaries);
+      appendTraceSection('摘要使用', [
+        trace.usedUnchapteredSummary || trace.usedSummary ? '章节外滚动摘要：已使用' : '章节外滚动摘要：未使用',
+        trace.usedActiveChapterRollingSummary ? '当前章节内部摘要：已使用' : '当前章节内部摘要：未使用'
+      ]);
       if (el.traceTitle) el.traceTitle.textContent = '本次使用的记忆';
       traceRestoreFocusTo = document.activeElement;
       el.traceOverlay.hidden = false;

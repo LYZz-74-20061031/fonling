@@ -10,6 +10,7 @@
 <meta name="theme-color" content="#0d0d0d">
 <link rel="stylesheet" href="css/memory.css">
 <link rel="stylesheet" href="css/model.css">
+<link rel="stylesheet" href="css/chapter.css">
 <style>
 /* ===== Reset & Base ===== */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -186,8 +187,10 @@ textarea{resize:none}
 
   <main id="chatArea"></main>
   <div id="memoryPromptBar" role="button" tabindex="0" aria-live="polite" hidden><span id="memoryPromptText"></span></div>
+  <div id="chapterPromptBar" role="button" tabindex="0" aria-live="polite" hidden><span id="chapterPromptText"></span></div>
   <div id="modelStatusBar">
     <button id="airModeBtn" type="button" aria-pressed="false">深度思考（付费模型）</button>
+    <div id="chapterStatus" aria-label="当前章节：无" title="当前章节：无">当前章节：无</div>
     <div id="identityBar" aria-label="当前身份">
       <span id="identityDot" aria-hidden="true"></span>
       <span id="identityName">主控</span>
@@ -274,6 +277,10 @@ textarea{resize:none}
       <span class="desc">历史事件、关键信息和当前场景在记忆中心统一管理。</span>
       <button class="btn-block btn-primary" id="memoryCenterBtn">记忆中心</button>
 
+      <div class="spacer"></div>
+      <span class="label">章节</span>
+      <span class="desc">章节是可选的剧情整理工具，可保存原文并生成长期摘要。</span>
+      <button class="btn-block btn-outline" id="chapterManagerBtn">章节管理</button>
 
       <div class="spacer"></div>
       <span class="label">角色（切换身份）</span>
@@ -324,6 +331,19 @@ textarea{resize:none}
       <div id="charListItems"></div>
     </div>
   </div>
+</div>
+
+<div id="chapterManagerOverlay" class="chapter-manager-overlay" aria-hidden="true" hidden>
+  <div class="chapter-manager-backdrop" data-chapter-backdrop></div>
+  <section class="chapter-manager" role="dialog" aria-modal="true" aria-labelledby="chapterManagerTitle">
+    <header><h2 id="chapterManagerTitle">章节管理</h2><button id="chapterManagerCloseBtn" type="button" aria-label="关闭章节管理">关闭</button></header>
+    <div class="chapter-manager-body">
+      <section class="chapter-manager-section"><h3>当前章节</h3><div id="chapterCurrent"></div></section>
+      <section class="chapter-manager-section"><h3>待确认摘要</h3><div id="chapterPending"></div></section>
+      <section class="chapter-manager-section"><h3>已结束章节</h3><div id="chapterEnded"></div></section>
+      <section id="chapterDetail" class="chapter-manager-detail" hidden></section>
+    </div>
+  </section>
 </div>
 
 <div id="memoryCandidateSheet" class="memory-candidate-overlay" aria-hidden="true" hidden>
@@ -389,6 +409,11 @@ textarea{resize:none}
 <script src="js/model/model-config.js"></script>
 <script src="js/model/model-gateway.js"></script>
 <script src="js/model/model-session.js"></script>
+<script src="js/chapter/chapter-model.js"></script>
+<script src="js/chapter/chapter-storage.js"></script>
+<script src="js/chapter/chapter-context.js"></script>
+<script src="js/chapter/chapter-controller.js"></script>
+<script src="js/chapter/chapter-ui.js"></script>
 <script src="js/memory/memory-model.js"></script>
 <script src="js/memory/memory-storage.js"></script>
 <script src="js/memory/memory-context.js"></script>
@@ -462,6 +487,9 @@ let state = {
    bgImage: '',
    messages: [],
    summary: '',
+  chapterSchemaVersion: 1,
+  chapters: [],
+  activeChapterId: null,
   userIdentity: '',
   memorySchemaVersion: 2,
   memories: [],
@@ -482,6 +510,8 @@ let conversationRequestEpoch = 0;
 let summaryRequestEpoch = 0;
 let backgroundOperationEpoch = 0;
 let characterSelectionEpoch = 0;
+let chapterSummaryEpoch = 0;
+let chapterSummaryRequestEpochs = {};
 
 const $ = id => document.getElementById(id);
  const chatArea = $('chatArea');
@@ -570,6 +600,19 @@ memoryNamespace.Model = memoryModel;
 memoryNamespace.Storage = memoryStorage;
 memoryNamespace.Context = memoryContext;
 globalThis.FonlingMemory = memoryNamespace;
+var chapterNamespace = typeof globalThis.FonlingChapter === 'object' && globalThis.FonlingChapter ? globalThis.FonlingChapter : {};
+var chapterModel = chapterNamespace.Model;
+var chapterStorage = chapterNamespace.Storage;
+var chapterContext = chapterNamespace.Context;
+function migrateCharacterDataWithChapters(settings, messages) {
+  var memoryMigrated = FonlingMemory.Storage.migrateCharacterData(settings, messages);
+  if (!memoryMigrated || memoryMigrated.supported === false) return memoryMigrated;
+  var chapterMigrated = chapterStorage.migrateCharacterData(memoryMigrated.settings, memoryMigrated.messages);
+  if (!chapterMigrated || chapterMigrated.supported === false) return chapterMigrated;
+  chapterMigrated.changed = Boolean(memoryMigrated.changed || chapterMigrated.changed);
+  chapterMigrated.diagnostics = (memoryMigrated.diagnostics || []).concat(chapterMigrated.diagnostics || []);
+  return chapterMigrated;
+}
 var memoryNoopUI = function() {};
 var memoryUI = { render: memoryNoopUI, openCenter: memoryNoopUI, closeCenter: memoryNoopUI, openCandidateSheet: memoryNoopUI, closeCandidateSheet: memoryNoopUI, openSource: memoryNoopUI, openTrace: memoryNoopUI, showAnalysisFailure: memoryNoopUI, showStorageWarning: memoryNoopUI, on: memoryNoopUI };
 var memoryFeatureAvailable = memoryModulesPresent;
@@ -648,6 +691,114 @@ if (memoryFeatureAvailable) {
   $('memoryStorageWarningOverlay').hidden = true;
 }
 
+var chapterUI = chapterNamespace.UI.createChapterUI({
+  status: $('chapterStatus'),
+  promptBar: $('chapterPromptBar'),
+  promptText: $('chapterPromptText'),
+  openButton: $('chapterManagerBtn'),
+  overlay: $('chapterManagerOverlay'),
+  backdrop: document.querySelector('[data-chapter-backdrop]'),
+  closeButton: $('chapterManagerCloseBtn'),
+  current: $('chapterCurrent'),
+  pending: $('chapterPending'),
+  ended: $('chapterEnded'),
+  detail: $('chapterDetail'),
+  getSnapshot: function() { return state; }
+});
+function replaceApplicationState(next) { state = next; }
+function updateChapterStatus() {
+  var node = $('chapterStatus');
+  if (!node) return;
+  var text = chapterNamespace.UI.statusText(state);
+  node.textContent = text; node.title = text; node.setAttribute('aria-label', text);
+}
+var chapterController = chapterNamespace.Controller.createChapterController({
+  getState: function() { return state; },
+  replaceState: replaceApplicationState,
+  save: saveCurrentCharacter,
+  now: function() { return new Date().toISOString(); },
+  createId: function() { return chapterModel.createId('chapter'); },
+  getAssistantName: function() { return state.currentCharacter || 'AI'; },
+  refresh: function() { chapterUI.render(state); }
+});
+function chapterOperationBlocked() {
+  if (!state.isStreaming) return false;
+  addSystemMsg('⚠️ 回复生成中，请等待完成后再操作章节', true);
+  return true;
+}
+function reportChapterOperation(result, fallback) {
+  if (result && result.ok) return true;
+  if (result && result.code === 'SAVE_FAILED') {
+    reportSaveFailure(result.saveResult, {
+      restored: (fallback || '章节操作保存失败') + '，原章节状态已恢复。',
+      partial: '章节操作保存失败，本地存储可能不完整，请立即导出完整备份。'
+    });
+    return false;
+  }
+  addSystemMsg('⚠️ ' + (fallback || result && result.code || '章节操作失败'), true);
+  return false;
+}
+chapterUI.on('start', function(payload) {
+  if (chapterOperationBlocked()) return;
+  reportChapterOperation(chapterController.start(payload.name), '无法开始章节，请检查名称或当前章节状态');
+});
+chapterUI.on('rename-active', function(payload) {
+  if (chapterOperationBlocked()) return;
+  reportChapterOperation(chapterController.rename(state.activeChapterId, payload.name), '章节名称不能为空');
+});
+chapterUI.on('rename-ended', function(payload) {
+  if (chapterOperationBlocked()) return;
+  if (!reportChapterOperation(chapterController.rename(payload.chapterId, payload.name), '章节名称不能为空')) return;
+  var renamed = state.chapters.find(function(chapter) { return chapter && chapter.id === payload.chapterId; });
+  if (renamed && renamed.summary && renamed.summary.draftStatus === 'generating') {
+    requestChapterSummary(state.currentCharacter, renamed.id, renamed.revision);
+  }
+});
+chapterUI.on('cancel-active', function() {
+  if (chapterOperationBlocked()) return;
+  if (!confirm('取消这个空章节吗？')) return;
+  reportChapterOperation(chapterController.cancel(), '只有尚无对话的章节可以取消');
+});
+chapterUI.on('end-active', function() {
+  if (chapterOperationBlocked()) return;
+  if (!confirm('结束章节后将永久冻结原文，不能重新打开、删除或跨章回溯。确认结束吗？')) return;
+  var chapterId = state.activeChapterId;
+  var sceneText = FonlingMemory.Context.formatScene(state.currentScene);
+  var result = chapterController.end({ sourceSceneText: sceneText });
+  if (!reportChapterOperation(result, '章节至少需要一轮完整对话')) return;
+  var ended = (state.chapters || []).find(function(chapter) { return chapter && chapter.id === chapterId; });
+  if (ended) requestChapterSummary(state.currentCharacter, chapterId, ended.revision);
+});
+chapterUI.on('confirm-summary', function(payload) {
+  if (chapterOperationBlocked()) return;
+  if (!payload.text) { addSystemMsg('⚠️ 章节摘要不能为空', true); return; }
+  var requestKey = chapterSummaryRequestKey(state.currentCharacter, payload.chapterId);
+  var previousSummaryRequestGuard = {
+    epoch: chapterSummaryEpoch,
+    hadRequest: Object.prototype.hasOwnProperty.call(chapterSummaryRequestEpochs, requestKey),
+    requestEpoch: chapterSummaryRequestEpochs[requestKey]
+  };
+  chapterSummaryRequestEpochs[requestKey] = ++chapterSummaryEpoch;
+  var result = chapterController.confirmSummary(payload.chapterId, payload.text);
+  if (!result || result.ok !== true) {
+    chapterSummaryEpoch = previousSummaryRequestGuard.epoch;
+    if (previousSummaryRequestGuard.hadRequest) chapterSummaryRequestEpochs[requestKey] = previousSummaryRequestGuard.requestEpoch;
+    else delete chapterSummaryRequestEpochs[requestKey];
+  }
+  reportChapterOperation(result, '章节摘要保存失败');
+});
+chapterUI.on('regenerate-summary', function(payload) {
+  if (chapterOperationBlocked()) return;
+  var previous = JSON.parse(JSON.stringify(state));
+  try { applyChapterState(chapterModel.beginSummary(state, payload.chapterId)); }
+  catch (_) { addSystemMsg('⚠️ 无法重新生成该章节摘要', true); return; }
+  var saveResult = saveCurrentCharacter();
+  if (!saveResult || saveResult.ok !== true) { state = previous; chapterUI.render(state); reportSaveFailure(saveResult, '重新生成章节摘要失败，原摘要已保留。'); return; }
+  chapterUI.render(state);
+  var chapter = state.chapters.find(function(item) { return item && item.id === payload.chapterId; });
+  if (chapter) requestChapterSummary(state.currentCharacter, payload.chapterId, chapter.revision);
+});
+
 /* ---- Persistence ---- */
 function getCharDataKey(name) {
   return LS.CHAR_PREFIX + name.toLowerCase().trim() + '_data';
@@ -715,9 +866,16 @@ function loadCharacterData(charName) {
   try {
     var d = JSON.parse(localStorage.getItem(getCharDataKey(charName)) || '{}');
     var loadedMessages = JSON.parse(localStorage.getItem(getCharMsgKey(charName)) || '[]');
-    var migrated = FonlingMemory.Storage.migrateCharacterData(d, loadedMessages);
+    var migrated = migrateCharacterDataWithChapters(d, loadedMessages);
     if (migrated.supported === false) return false;
     d = migrated.settings;
+    var interruptedSummaryRecovery = chapterModel.recoverInterruptedSummaries(d, function(chapter) {
+      return chapterSummaryRequestIsTracked(charName, chapter.id);
+    });
+    if (interruptedSummaryRecovery.changed) {
+      d = Object.assign({}, d, interruptedSummaryRecovery.state);
+      migrated.changed = true;
+    }
     var legacyKeyMigration = migrateLegacyModelConfig(d.apiKey);
     var keepLegacyApiKey = Boolean(d.apiKey && (!legacyKeyMigration || legacyKeyMigration.ok !== true));
     d = sanitizeCharacterSettings(d, keepLegacyApiKey);
@@ -731,6 +889,9 @@ function loadCharacterData(charName) {
       roles: Array.isArray(d.roles) ? d.roles : [],
       currentRole: d.currentRole || null,
       summary: d.summary || '',
+      chapterSchemaVersion: d.chapterSchemaVersion,
+      chapters: d.chapters,
+      activeChapterId: d.activeChapterId,
       memorySchemaVersion: d.memorySchemaVersion,
       memories: d.memories,
       currentScene: d.currentScene,
@@ -784,7 +945,7 @@ function saveCurrentCharacter() {
       userIdentity: state.userIdentity, bgImage: state.bgImage,
       roles: state.roles, currentRole: state.currentRole,
       summary: state.summary
-    }, FonlingMemory.Storage.serializeMemoryState(state));
+    }, FonlingMemory.Storage.serializeMemoryState(state), chapterStorage.serializeChapterState(state));
     settingsToSave = sanitizeCharacterSettings(settingsToSave, Boolean(settingsToSave.apiKey && !modelConfig.deepseekApiKey));
     localStorage.setItem(dataKey, JSON.stringify(settingsToSave));
     localStorage.setItem(messageKey, JSON.stringify(state.messages));
@@ -831,7 +992,7 @@ function loadCharacterSnapshotForAnalysis(charName) {
   try {
     var rawSettings = JSON.parse(localStorage.getItem(getCharDataKey(charName)) || '{}');
     var rawMessages = JSON.parse(localStorage.getItem(getCharMsgKey(charName)) || '[]');
-    var migrated = FonlingMemory.Storage.migrateCharacterData(rawSettings, rawMessages);
+    var migrated = migrateCharacterDataWithChapters(rawSettings, rawMessages);
     if (migrated.supported === false) return null;
     return Object.assign({}, migrated.settings, {
       currentCharacter: charName,
@@ -870,7 +1031,7 @@ function saveCharacterSnapshotForAnalysis(charName, snapshot) {
       roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
       currentRole: snapshot.currentRole || null,
       summary: snapshot.summary || ''
-    }, FonlingMemory.Storage.serializeMemoryState(snapshot));
+    }, FonlingMemory.Storage.serializeMemoryState(snapshot), chapterStorage.serializeChapterState(snapshot));
     settingsToSave = sanitizeCharacterSettings(settingsToSave, Boolean(settingsToSave.apiKey && !modelConfig.deepseekApiKey));
     localStorage.setItem(dataKey, JSON.stringify(settingsToSave));
     localStorage.setItem(messageKey, JSON.stringify(Array.isArray(snapshot.messages) ? snapshot.messages : []));
@@ -893,6 +1054,87 @@ function saveCharacterSnapshotForAnalysis(charName, snapshot) {
   }
 }
 
+function chapterSummaryRequestKey(characterName, chapterId) {
+  return String(characterName || '') + '::' + String(chapterId || '');
+}
+function chapterSummaryRequestIsTracked(characterName, chapterId) {
+  return Object.prototype.hasOwnProperty.call(chapterSummaryRequestEpochs, chapterSummaryRequestKey(characterName, chapterId));
+}
+function invalidateChapterSummaryRequests() {
+  chapterSummaryEpoch += 1;
+  chapterSummaryRequestEpochs = {};
+}
+function refreshChapterSurfaces() {
+  if (typeof chapterUI !== 'undefined' && chapterUI && typeof chapterUI.render === 'function') chapterUI.render(state);
+  if (typeof updateChapterStatus === 'function') updateChapterStatus();
+}
+function applyChapterSummaryMutation(request, mutation) {
+  var key = chapterSummaryRequestKey(request.characterName, request.chapterId);
+  if (chapterSummaryRequestEpochs[key] !== request.epoch) return false;
+  var snapshot = loadCharacterSnapshotForAnalysis(request.characterName);
+  if (!snapshot) return false;
+  var chapter = (snapshot.chapters || []).find(function(item) { return item && item.id === request.chapterId; });
+  if (!chapterNamespace.Controller.summaryRequestMatches(request, {
+    characterName: request.characterName,
+    chapter: chapter,
+    epoch: chapterSummaryRequestEpochs[key]
+  })) return false;
+  var nextChapterState;
+  try { nextChapterState = mutation(snapshot, chapter); } catch (_) { return false; }
+  var nextSnapshot = Object.assign({}, snapshot, nextChapterState);
+  var saveResult = saveCharacterSnapshotForAnalysis(request.characterName, nextSnapshot);
+  if (!saveResult || saveResult.ok !== true) {
+    if (state.currentCharacter === request.characterName) {
+      try {
+        applyChapterState(chapterModel.setSummaryFailure(state, request.chapterId, {
+          code: 'CHAPTER_SUMMARY_SAVE_FAILED',
+          message: '章节摘要保存失败，请释放存储空间后重试',
+          at: new Date().toISOString()
+        }));
+      } catch (_) {}
+      reportSaveFailure(saveResult, {
+        restored: '章节摘要保存失败，已保留为可重试状态。',
+        partial: '章节摘要保存失败，本地存储可能不完整，请立即导出完整备份。'
+      });
+      refreshChapterSurfaces();
+    }
+    return false;
+  }
+  if (state.currentCharacter === request.characterName) applyChapterState(nextChapterState);
+  refreshChapterSurfaces();
+  return true;
+}
+async function requestChapterSummary(characterName, chapterId, expectedRevision) {
+  var key = chapterSummaryRequestKey(characterName, chapterId);
+  var epoch = ++chapterSummaryEpoch;
+  chapterSummaryRequestEpochs[key] = epoch;
+  var request = { characterName: characterName, chapterId: chapterId, revision: expectedRevision, epoch: epoch };
+  var snapshot = loadCharacterSnapshotForAnalysis(characterName);
+  var chapter = snapshot && (snapshot.chapters || []).find(function(item) { return item && item.id === chapterId; });
+  if (!chapterNamespace.Controller.summaryRequestMatches(request, { characterName: characterName, chapter: chapter, epoch: epoch })) return false;
+  try {
+    var plan = createModelRequestPlan('summary', { provider: 'glm' });
+    if (!plan.apiKey) throw new Error('请先配置 GLM API Key');
+    var response = await requestModel(plan, chapterNamespace.Controller.buildFinalSummaryMessages(chapter));
+    var validated = chapterNamespace.Controller.validateFinalSummary(response && response.content);
+    if (!validated.ok) throw Object.assign(new Error(validated.code), { code: validated.code });
+    return applyChapterSummaryMutation(request, function(liveSnapshot) {
+      return chapterModel.setSummaryDraft(liveSnapshot, chapterId, validated.text, new Date().toISOString());
+    });
+  } catch (error) {
+    applyChapterSummaryMutation(request, function(liveSnapshot) {
+      return chapterModel.setSummaryFailure(liveSnapshot, chapterId, {
+        code: error && error.code || 'CHAPTER_SUMMARY_FAILED',
+        message: error && error.message || '章节摘要生成失败',
+        at: new Date().toISOString()
+      });
+    });
+    return false;
+  } finally {
+    if (chapterSummaryRequestEpochs[key] === epoch) delete chapterSummaryRequestEpochs[key];
+  }
+}
+
 /* ---- Background ---- */
 function applyBackground(url) {
   if (url) {
@@ -908,8 +1150,20 @@ function applyBackground(url) {
 /* ---- Render Messages ---- */
 
 function hexToRgba(h,a){var r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return 'rgba('+r+','+g+','+b+','+a+')'}
+function canMutateChapterMessage(message) {
+  return Boolean(message && (!message.chapterId || message.chapterId === state.activeChapterId));
+}
+function canBacktrackChapterMessage(message) {
+  return Boolean(message && message.role === 'assistant' && state.activeChapterId && message.chapterId === state.activeChapterId);
+}
+function applyChapterState(nextChapterState) {
+  state.chapterSchemaVersion = nextChapterState.chapterSchemaVersion;
+  state.chapters = nextChapterState.chapters;
+  state.activeChapterId = nextChapterState.activeChapterId;
+}
 function renderMessages(scrollToBottom_) {
   if (scrollToBottom_ === undefined) scrollToBottom_ = true;
+  if (chapterUI && typeof chapterUI.render === 'function') chapterUI.render(state);
   chatArea.innerHTML = '';
   if (state.messages.length === 0) {
     const welcome = document.createElement('div');
@@ -949,19 +1203,23 @@ function renderMessages(scrollToBottom_) {
       var _a = document.createElement('div'); _a.className = 'msg-actions';
       // backtrack button for non-latest AI messages
       if (i < state.messages.length - 1) {
-        var _b = document.createElement('button'); _b.className = 'msg-action-btn'; _b.textContent = '回溯';
-        _b.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();backtrackMessage(idx);};}(i));
-        _a.appendChild(_b);
+        if (canBacktrackChapterMessage(msg)) {
+          var _b = document.createElement('button'); _b.className = 'msg-action-btn'; _b.textContent = '回溯';
+          _b.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();backtrackMessage(idx);};}(i));
+          _a.appendChild(_b);
+        }
       }
       // edit + free/Air regeneration for latest AI message
       if (i === state.messages.length - 1) {
-        var _e = document.createElement('button'); _e.className = 'msg-action-btn'; _e.textContent = '编辑';
-        var _f = document.createElement('button'); _f.className = 'msg-action-btn'; _f.textContent = '重新回复';
-        var _r = document.createElement('button'); _r.className = 'msg-action-btn'; _r.textContent = '重新深度思考';
-        _e.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();startEdit(idx);};}(i));
-        _f.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage('free');});
-        _r.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage('air');});
-        _a.appendChild(_e); _a.appendChild(_f); _a.appendChild(_r);
+        if (canMutateChapterMessage(msg)) {
+          var _e = document.createElement('button'); _e.className = 'msg-action-btn'; _e.textContent = '编辑';
+          var _f = document.createElement('button'); _f.className = 'msg-action-btn'; _f.textContent = '重新回复';
+          var _r = document.createElement('button'); _r.className = 'msg-action-btn'; _r.textContent = '重新深度思考';
+          _e.addEventListener('click', function(idx){return function(ev){ev.stopPropagation();startEdit(idx);};}(i));
+          _f.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage('free');});
+          _r.addEventListener('click', function(ev){ev.stopPropagation();regenerateMessage('air');});
+          _a.appendChild(_e); _a.appendChild(_f); _a.appendChild(_r);
+        }
       }
       if (state.memoryRequestTraces && msg.id && state.memoryRequestTraces[msg.id]) {
         var _t = document.createElement('button'); _t.className = 'msg-action-btn'; _t.textContent = '查看本次使用的记忆';
@@ -973,6 +1231,8 @@ function renderMessages(scrollToBottom_) {
     }
     chatArea.appendChild(wrap);
   }
+  var latestMessage = state.messages[state.messages.length - 1];
+  if (!state.isStreaming && latestMessage && latestMessage.role === 'user') showFailedSendActions();
   if (scrollToBottom_) scrollToBottom();
 }
 function startEdit(index) {
@@ -1002,12 +1262,27 @@ function commitMessageEdit(index, newValue) {
   if (index < 0 || index >= state.messages.length) return false;
   var value = (newValue || '').trim();
   if (!value) return false;
-  var previousContent = state.messages[index].content;
-  state.messages[index].content = value;
+  if (!canMutateChapterMessage(state.messages[index])) return false;
+  var previousConversationState = captureConversationState();
+  state.messages = state.messages.map(function(message, messageIndex) {
+    return messageIndex === index ? Object.assign({}, message, { content: value }) : message;
+  });
+  if (state.messages[index].chapterId) {
+    try {
+      applyChapterState(chapterModel.replaceAssistantMessage(state, state.messages[index].id, {
+        id: state.messages[index].id,
+        content: value,
+        speakerName: state.currentCharacter
+      }));
+    } catch (chapterEditError) {
+      applyConversationState(previousConversationState);
+      return false;
+    }
+  }
   var saveResult;
   try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
   if (!saveResult || saveResult.ok !== true) {
-    state.messages[index].content = previousContent;
+    applyConversationState(previousConversationState);
     renderMessages();
     reportSaveFailure(saveResult, {
       restored: '消息编辑保存失败，原内容已恢复。',
@@ -1066,6 +1341,14 @@ function buildApiMessages(options) {
     userText: userText,
     recentMessages: rawMessages.slice(-RECENT_KEEP)
   });
+  var selectedNarrativeContext = chapterContext.buildNarrativeContext({
+    chapters: state.chapters,
+    activeChapterId: state.activeChapterId,
+    summary: state.summary,
+    userText: userText,
+    currentSceneText: FonlingMemory.Context.formatScene(state.currentScene),
+    recentMessages: rawMessages.slice(-RECENT_KEEP)
+  });
   var result = [];
   if (state.systemPrompt) result.push({ role: 'system', content: state.systemPrompt });
   if (state.currentRole) {
@@ -1078,20 +1361,91 @@ function buildApiMessages(options) {
     result.push({ role: 'system', content: '回复时请遵循以下风格要求：' + state.style });
   }
   selectedMemoryContext.messages.forEach(function(message) { result.push(message); });
-  if (state.summary) {
-    result.push({ role: 'system', content: '以下是之前的对话摘要，请参考这些信息保持连续性：\n' + state.summary });
-  }
+  selectedNarrativeContext.messages.forEach(function(message) { result.push(message); });
   rawMessages.slice(-RECENT_KEEP).forEach(function(message) {
     result.push({ role: message.role, content: message.content });
   });
   return {
     messages: result,
-    memoryTrace: Object.assign({}, selectedMemoryContext.trace, { usedSummary: Boolean(state.summary) })
+    memoryTrace: Object.assign({}, selectedMemoryContext.trace, selectedNarrativeContext.trace, {
+      usedSummary: selectedNarrativeContext.trace.usedUnchapteredSummary === true,
+      chapterSummaryIds: selectedNarrativeContext.trace.chapterSummaryIds || []
+    })
   };
 }
 
 /* ---- Auto Summarize ---- */
 async function autoSummarize() {
+  if (state.summarising) return;
+  var plan = chapterContext.buildCompactionPlan(state, { maximum: MAX_MSG_BEFORE_SUMMARY, keep: RECENT_KEEP });
+  if (!plan) return;
+  state.summarising = true;
+  var sourceCharacter = state.currentCharacter;
+  var requestEpoch = ++summaryRequestEpoch;
+  var sourceSnapshot = captureConversationState();
+  var sourceSummary = state.summary;
+  var sourceChapterRevisionSignature = JSON.stringify((state.chapters || []).map(function(chapter) { return [chapter.id, chapter.revision]; }));
+  function requestIdentityIsCurrent() {
+    return state.currentCharacter === sourceCharacter && summaryRequestEpoch === requestEpoch;
+  }
+  function current() {
+    return requestIdentityIsCurrent() && !state.isStreaming
+      && state.summary === sourceSummary
+      && JSON.stringify((state.chapters || []).map(function(chapter) { return [chapter.id, chapter.revision]; })) === sourceChapterRevisionSignature
+      && JSON.stringify(plan.retiredMessageIds) === JSON.stringify(state.messages.slice(0, plan.retiredMessageIds.length).map(function(message) { return message && message.id; }));
+  }
+  var noteWrap = document.createElement('div');
+  noteWrap.className = 'msg-wrap system';
+  noteWrap.innerHTML = '<div class="bubble summary-note">🔄 对话较长，正在按章节归属压缩历史…</div>';
+  chatArea.appendChild(noteWrap);
+  scrollToBottom();
+  try {
+    var summaries = {};
+    for (var groupIndex = 0; groupIndex < plan.groups.length; groupIndex += 1) {
+      var group = plan.groups[groupIndex];
+      if (!group.needsSummary) continue;
+      var prompt = [{ role: 'system', content: '你是剧情记忆整理助手。把已有摘要和新增对话合并为连贯、精炼的完整摘要。保留人物关系、承诺、冲突、关键事件和未解决事项；只输出摘要正文。' }];
+      if (group.baseSummary) prompt.push({ role: 'system', content: '已有摘要：\n' + group.baseSummary });
+      prompt.push({ role: 'system', content: '需要并入的新增对话：' });
+      group.messages.forEach(function(message) { prompt.push({ role: message.role, content: message.content }); });
+      var response = await requestModel(createModelRequestPlan('summary'), prompt);
+      if (!current()) return;
+      var text = response && typeof response.content === 'string' ? response.content.trim() : '';
+      if (!text) throw new Error('摘要为空');
+      summaries[group.ownerKey] = text;
+    }
+    if (!current()) return;
+    var next = chapterContext.applyCompactionResults(state, plan, summaries);
+    applyConversationState(Object.assign({}, next, {
+      memoryCandidates: state.memoryCandidates,
+      memoryAnalysis: state.memoryAnalysis,
+      memoryRequestTraces: state.memoryRequestTraces
+    }));
+    var saveResult = saveCurrentCharacter();
+    if (!saveResult || saveResult.ok !== true) {
+      restoreConversationAfterSaveFailure(sourceSnapshot, saveResult);
+      reportSaveFailure(saveResult, {
+        restored: '历史压缩保存失败，原聊天记录已恢复。',
+        partial: '历史压缩保存失败，本地存储可能不完整，请立即导出备份。'
+      });
+      return;
+    }
+    plan.groups.forEach(function(group) {
+      if (!group.chapterId) return;
+      var compactedChapter = state.chapters.find(function(chapter) { return chapter && chapter.id === group.chapterId; });
+      if (compactedChapter && compactedChapter.summary && compactedChapter.summary.draftStatus === 'generating') {
+        requestChapterSummary(state.currentCharacter, compactedChapter.id, compactedChapter.revision);
+      }
+    });
+    noteWrap.querySelector('.bubble').textContent = '✅ 历史已按章节归属压缩';
+    setTimeout(function() { noteWrap.remove(); if (!state.isStreaming && requestIdentityIsCurrent()) renderMessages(); }, 1500);
+  } catch (_) {
+    if (noteWrap.parentNode) noteWrap.remove();
+  } finally {
+    if (requestIdentityIsCurrent()) state.summarising = false;
+  }
+}
+async function autoSummarizeLegacy() {
   if (state.summarising) return;
   if (state.messages.length <= MAX_MSG_BEFORE_SUMMARY) return;
   state.summarising = true;
@@ -1213,6 +1567,9 @@ function captureConversationState() {
   return {
     messages: state.messages,
     summary: state.summary,
+    chapterSchemaVersion: state.chapterSchemaVersion,
+    chapters: state.chapters,
+    activeChapterId: state.activeChapterId,
     memoryCandidates: state.memoryCandidates,
     memoryAnalysis: state.memoryAnalysis,
     memoryRequestTraces: state.memoryRequestTraces
@@ -1241,9 +1598,22 @@ function finishConversationRequest(request, focusInput) {
 function applyConversationState(next) {
   state.messages = next.messages;
   state.summary = next.summary;
+  state.chapterSchemaVersion = next.chapterSchemaVersion;
+  state.chapters = next.chapters;
+  state.activeChapterId = next.activeChapterId;
   state.memoryCandidates = next.memoryCandidates;
   state.memoryAnalysis = next.memoryAnalysis;
   state.memoryRequestTraces = next.memoryRequestTraces;
+}
+
+function restoreConversationAfterSaveFailure(previousConversationState, saveResult) {
+  var restored = previousConversationState;
+  if (saveResult && saveResult.rolledBack !== false) {
+    var persisted = loadCharacterSnapshotForAnalysis(state.currentCharacter);
+    if (persisted) restored = persisted;
+  }
+  applyConversationState(restored);
+  return restored;
 }
 
 function conversationStateForMessages(messages, summary) {
@@ -1263,7 +1633,10 @@ function recordMemoryRequestTrace(existingTraces, assistantMessageId, trace, mes
     pinnedMemoryIds: Array.isArray(trace.pinnedMemoryIds) ? trace.pinnedMemoryIds.slice() : [],
     relatedMemoryIds: Array.isArray(trace.relatedMemoryIds) ? trace.relatedMemoryIds.slice() : [],
     sceneUpdatedAt: typeof trace.sceneUpdatedAt === 'string' ? trace.sceneUpdatedAt : '',
-    usedSummary: trace.usedSummary === true
+    usedSummary: trace.usedSummary === true,
+    chapterSummaryIds: Array.isArray(trace.chapterSummaryIds) ? trace.chapterSummaryIds.slice() : [],
+    usedActiveChapterRollingSummary: trace.usedActiveChapterRollingSummary === true,
+    usedUnchapteredSummary: trace.usedUnchapteredSummary === true
   };
   var newestAssistantIds = (Array.isArray(messages) ? messages : [])
     .filter(function(message) { return message && message.role === 'assistant' && typeof message.id === 'string' && message.id; })
@@ -1290,7 +1663,7 @@ function persistFailedSend(previousConversationState, errorMessage, request) {
     saveResult = { ok: false, rolledBack: false };
   }
   if (!saveResult || saveResult.ok !== true) {
-    applyConversationState(previousConversationState);
+    restoreConversationAfterSaveFailure(previousConversationState, saveResult);
     renderMessages();
     reportSaveFailure(saveResult, {
       restored: '消息保存失败，本次发送已恢复到发送前。',
@@ -1337,13 +1710,15 @@ async function sendMessage(options) {
     role: 'user',
     content: finalText,
     _narration: isNarration || undefined,
-    _roleName: state.currentRole || null
+    _roleName: state.currentRole || null,
+    chapterId: state.activeChapterId || undefined
   };
   var assistantMsg = {
     id: FonlingMemory.Model.createId('message'),
     role: 'assistant',
     content: '',
-    _streaming: true
+    _streaming: true,
+    chapterId: userMsg.chapterId || undefined
   };
   state.messages = reusedUserMsg
     ? state.messages.concat(assistantMsg)
@@ -1393,10 +1768,16 @@ async function sendMessage(options) {
       apiBuild.memoryTrace,
       state.messages
     );
+    if (userMsg.chapterId) {
+      applyChapterState(chapterModel.appendCompletedTurn(state, userMsg, assistantMsg, {
+        userSpeakerName: userMsg._roleName || '主控',
+        assistantSpeakerName: state.currentCharacter
+      }));
+    }
     var sendSaveResult;
     try { sendSaveResult = saveCurrentCharacter(); } catch (saveError) { sendSaveResult = { ok: false, rolledBack: false }; }
     if (!sendSaveResult || sendSaveResult.ok !== true) {
-      applyConversationState(previousConversationState);
+      restoreConversationAfterSaveFailure(previousConversationState, sendSaveResult);
       renderMessages();
       reportSaveFailure(sendSaveResult, {
         restored: '回复保存失败，本次对话已恢复到发送前。',
@@ -1447,6 +1828,7 @@ async function regenerateMessage(mode) {
     if (state.messages[ri].role === 'assistant') { aiIdx = ri; break; }
   }
   if (aiIdx === -1) return;
+  if (state.messages[aiIdx].chapterId && state.messages[aiIdx].chapterId !== state.activeChapterId) return;
   var usrIdx = -1;
   for (var uj = aiIdx - 1; uj >= 0; uj--) {
     if (state.messages[uj].role === 'user') { usrIdx = uj; break; }
@@ -1486,7 +1868,12 @@ async function regenerateMessage(mode) {
     finishConversationRequest(request);
     return;
   }
-  var astMsg = { id: FonlingMemory.Model.createId('message'), role: 'assistant', content: '' };
+  var astMsg = {
+    id: FonlingMemory.Model.createId('message'),
+    role: 'assistant',
+    content: '',
+    chapterId: previousConversationState.messages[aiIdx].chapterId || undefined
+  };
   try {
     var regenerationResult = await requestModel(regenerationPlan, apiBuild.messages);
     var fullContent = regenerationResult.content;
@@ -1501,6 +1888,13 @@ async function regenerateMessage(mode) {
     var nextConversationState = conversationStateForMessages(retainedMessages.concat(astMsg), previousConversationState.summary);
     applyConversationState(nextConversationState);
     FonlingMemory.Model.ensureMessageIds(state.messages);
+    if (astMsg.chapterId) {
+      applyChapterState(chapterModel.replaceAssistantMessage(state, previousConversationState.messages[aiIdx].id, {
+        id: astMsg.id,
+        content: astMsg.content,
+        speakerName: state.currentCharacter
+      }));
+    }
     state.memoryRequestTraces = recordMemoryRequestTrace(
       state.memoryRequestTraces,
       astMsg.id,
@@ -1510,7 +1904,7 @@ async function regenerateMessage(mode) {
     var regenerateSaveResult;
     try { regenerateSaveResult = saveCurrentCharacter(); } catch (saveError) { regenerateSaveResult = { ok: false, rolledBack: false }; }
     if (!regenerateSaveResult || regenerateSaveResult.ok !== true) {
-      applyConversationState(previousConversationState);
+      restoreConversationAfterSaveFailure(previousConversationState, regenerateSaveResult);
       renderMessages();
       reportSaveFailure(regenerateSaveResult, {
         restored: regenerationLabel + '保存失败，原回答已保留。',
@@ -1578,6 +1972,7 @@ function retryLastFailedMessage(useAir) {
 }
 
 function showFailedSendActions() {
+  if (chatArea.querySelector('.model-failure-actions')) return;
   var userMessage = state.messages[state.messages.length - 1];
   if (!userMessage || userMessage.role !== 'user') return;
   var actions = document.createElement('div');
@@ -1621,11 +2016,11 @@ function buildExportData(sourceState, now) {
     currentRole: sourceState.currentRole,
     userIdentity: sourceState.userIdentity
   };
-  Object.assign(settings, FonlingMemory.Storage.serializeMemoryState(sourceState));
+  Object.assign(settings, FonlingMemory.Storage.serializeMemoryState(sourceState), chapterStorage.serializeChapterState(sourceState));
   settings = sanitizeCharacterSettings(settings, false);
   return JSON.parse(JSON.stringify({
     schemaVersion: 2,
-    export_version: 2,
+    export_version: 3,
     exported_at: exportedAt,
     settings: settings,
     messages: sourceState.messages
@@ -1648,17 +2043,19 @@ function exportAllData() {
 
 function normalizeImportedCharacter(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('无效的配置文件格式');
-  if (Number(data.schemaVersion) > 2 || Number(data.export_version) > 2) throw new Error('不支持更高版本的备份文件');
+  if (Number(data.schemaVersion) > 2 || Number(data.export_version) > 3) throw new Error('不支持更高版本的备份文件');
   if (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('无效的配置文件格式');
   if (!Array.isArray(data.messages)) throw new Error('无效的消息列表');
   var importedCopy = JSON.parse(JSON.stringify(data));
   var migrated;
   try {
-    migrated = FonlingMemory.Storage.migrateCharacterData(importedCopy.settings, importedCopy.messages);
+    migrated = migrateCharacterDataWithChapters(importedCopy.settings, importedCopy.messages);
   } catch (error) {
     throw new Error('导入数据无法迁移');
   }
   if (!migrated || migrated.supported === false) throw new Error('不支持更高版本的记忆数据');
+  var recoveredImportedSummaries = chapterModel.recoverInterruptedSummaries(migrated.settings, function() { return false; });
+  if (recoveredImportedSummaries.changed) migrated.settings = Object.assign({}, migrated.settings, recoveredImportedSummaries.state);
   return {
     settings: migrated.settings,
     messages: migrated.messages
@@ -1684,6 +2081,9 @@ function importData(file) {
         style: s.style || '',
         bgImage: s.bgImage || '',
         summary: s.summary || '',
+        chapterSchemaVersion: s.chapterSchemaVersion,
+        chapters: s.chapters,
+        activeChapterId: s.activeChapterId,
         roles: importedRoles,
         currentRole: importedRoles.some(function(role) { return role && role.name === s.currentRole; }) ? s.currentRole : null,
         userIdentity: s.userIdentity || '',
@@ -1693,12 +2093,20 @@ function importData(file) {
         currentScene: s.currentScene,
         memoryCandidates: s.memoryCandidates,
         memoryAnalysis: s.memoryAnalysis,
-        memoryRequestTraces: s.memoryRequestTraces
+        memoryRequestTraces: s.memoryRequestTraces,
+        isStreaming: false,
+        summarising: false
       };
       importedState.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
       s.currentRole = importedState.currentRole;
       var previousState = JSON.parse(JSON.stringify(state));
       var previousSettings = JSON.parse(JSON.stringify(loadedCharacterSettings));
+      var previousImportRequestState = {
+        conversation: conversationRequestEpoch,
+        summary: summaryRequestEpoch,
+        background: backgroundOperationEpoch,
+        selection: characterSelectionEpoch
+      };
       loadedCharacterSettings = JSON.parse(JSON.stringify(s));
       conversationRequestEpoch += 1;
       summaryRequestEpoch += 1;
@@ -1711,12 +2119,17 @@ function importData(file) {
         Object.keys(state).forEach(function(key) { delete state[key]; });
         Object.assign(state, previousState);
         loadedCharacterSettings = previousSettings;
+        conversationRequestEpoch = previousImportRequestState.conversation;
+        summaryRequestEpoch = previousImportRequestState.summary;
+        backgroundOperationEpoch = previousImportRequestState.background;
+        characterSelectionEpoch = previousImportRequestState.selection;
         reportSaveFailure(saveResult, {
           restored: '导入失败：无法保存数据，原数据已恢复。',
           partial: '导入失败：本地存储可能部分更新，请立即导出备份并重新打开页面。'
         });
         return;
       }
+      invalidateChapterSummaryRequests();
       var legacyImportMigration = migrateLegacyModelConfig(importedLegacyKey);
       if (legacyImportMigration && legacyImportMigration.ok !== true) {
         addSystemMsg('⚠️ 角色已导入，但旧版 DeepSeek Key 未能迁移到全局设置，请手动重新填写', true);
@@ -1863,6 +2276,7 @@ function createCharacter(name) {
   delete state.apiKey;
   state.systemPrompt = ''; state.style = ''; state.userIdentity = '';
   state.bgImage = ''; state.roles = []; state.currentRole = null; state.summary = ''; state.messages = [];
+  Object.assign(state, chapterModel.createEmptyState());
   Object.assign(state, FonlingMemory.Storage.createEmptyMemoryState());
   state.memorySnapshotIdentity = (state.memorySnapshotIdentity || 0) + 1;
   var saveResult = saveCurrentCharacter();
@@ -1974,6 +2388,7 @@ function deleteCharacter() {
   conversationRequestEpoch += 1;
   summaryRequestEpoch += 1;
   characterSelectionEpoch += 1;
+  invalidateChapterSummaryRequests();
   modelSession.reset();
   state.currentCharacter = '';
   showLoginScreen();
@@ -2226,10 +2641,17 @@ importFileInput.addEventListener('change', function(e) {
 function backtrackMessage(idx) {
   if (state.isStreaming) { addSystemMsg('⚠️ 回复生成中，请等待完成后再修改对话', true); return; }
   if (idx < 0 || idx >= state.messages.length) return;
+  if (!canBacktrackChapterMessage(state.messages[idx])) return;
   if (!confirm('确认回溯到这条消息？此操作将删除之后的所有对话记录。')) return;
   var previousConversationState = captureConversationState();
   var retainedMessages = state.messages.slice(0, idx + 1);
   applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
+  try {
+    applyChapterState(chapterModel.truncateActiveChapterAfter(state, state.messages[idx].id));
+  } catch (chapterBacktrackError) {
+    applyConversationState(previousConversationState);
+    return;
+  }
   var backtrackSaveResult;
   try { backtrackSaveResult = saveCurrentCharacter(); } catch (error) { backtrackSaveResult = { ok: false, rolledBack: false }; }
   if (!backtrackSaveResult || backtrackSaveResult.ok !== true) {
@@ -2435,44 +2857,51 @@ function getRoleSystemMsg() {
 }
 
 $('clearChatBtn').addEventListener('click', function() {
-  var analysis = state.memoryAnalysis || {};
-  var hasDerivedMemory = (state.memoryCandidates || []).length > 0
-    || (analysis.analyzedTurnKeys || []).length > 0
-    || analysis.lastFailure !== null && analysis.lastFailure !== undefined
-    || analysis.activeCharacter !== null && analysis.activeCharacter !== undefined
-    || Object.keys(state.memoryRequestTraces || {}).length > 0;
-  if (state.messages.length === 0 && !state.summary && !hasDerivedMemory) return;
-  if (!confirm('确定要清空所有聊天记录吗？此操作不可撤销。')) return;
-  var previousConversationState = {
-    messages: state.messages,
-    summary: state.summary,
-    memoryCandidates: state.memoryCandidates,
-    memoryAnalysis: state.memoryAnalysis,
-    memoryRequestTraces: state.memoryRequestTraces
+  if (state.isStreaming) { addSystemMsg('⚠️ 回复生成中，暂不能清空所有剧情', true); return; }
+  var hasNarrativeState = state.messages.length > 0 || Boolean(state.summary)
+    || (state.chapters || []).length > 0 || (state.memories || []).length > 0
+    || (state.memoryCandidates || []).length > 0 || Object.keys(state.memoryRequestTraces || {}).length > 0
+    || Boolean(FonlingMemory.Context.formatScene(state.currentScene)) || Boolean(state.currentRole);
+  if (!hasNarrativeState) return;
+  if (!confirm('确定要清空所有剧情和记忆吗？清空后智能体会像从未聊过一样重新开始。AI 人设、主控身份、其他角色、背景和 API 设置会保留；此操作不可撤销。')) return;
+  var previousState = JSON.parse(JSON.stringify(state));
+  var previousRequestState = {
+    conversation: conversationRequestEpoch,
+    summary: summaryRequestEpoch,
+    background: backgroundOperationEpoch,
+    selection: characterSelectionEpoch,
+    chapter: chapterSummaryEpoch,
+    chapterRequests: Object.assign({}, chapterSummaryRequestEpochs)
   };
-  var clearedConversationState = FonlingMemory.Model.clearConversationMemoryArtifacts(state);
-  state.messages = clearedConversationState.messages;
-  state.summary = clearedConversationState.summary;
-  state.memoryCandidates = clearedConversationState.memoryCandidates;
-  state.memoryAnalysis = clearedConversationState.memoryAnalysis;
-  state.memoryRequestTraces = clearedConversationState.memoryRequestTraces;
+  conversationRequestEpoch += 1;
+  summaryRequestEpoch += 1;
+  backgroundOperationEpoch += 1;
+  characterSelectionEpoch += 1;
+  invalidateChapterSummaryRequests();
+  state = chapterModel.clearNarrativeState(state, FonlingMemory.Model.EMPTY_SCENE);
   var saveResult;
   try { saveResult = saveCurrentCharacter(); } catch (error) { saveResult = { ok: false, rolledBack: false }; }
   if (!saveResult || saveResult.ok !== true) {
-    state.messages = previousConversationState.messages;
-    state.summary = previousConversationState.summary;
-    state.memoryCandidates = previousConversationState.memoryCandidates;
-    state.memoryAnalysis = previousConversationState.memoryAnalysis;
-    state.memoryRequestTraces = previousConversationState.memoryRequestTraces;
+    state = previousState;
+    conversationRequestEpoch = previousRequestState.conversation;
+    summaryRequestEpoch = previousRequestState.summary;
+    backgroundOperationEpoch = previousRequestState.background;
+    characterSelectionEpoch = previousRequestState.selection;
+    chapterSummaryEpoch = previousRequestState.chapter;
+    chapterSummaryRequestEpochs = previousRequestState.chapterRequests;
     reportSaveFailure(saveResult, {
-      restored: '清空失败，原聊天记录已恢复。',
-      partial: '清空失败，本地存储可能不完整，请立即导出备份。'
+      restored: '清空失败，原剧情、章节和记忆已恢复。',
+      partial: '清空失败，本地存储可能不完整，请立即导出完整备份。'
     });
     if (typeof memoryController !== 'undefined') memoryController.sync();
+    chapterUI.render(state);
     return;
   }
+  modelSession.reset();
   renderMessages();
+  updateIdentityBar();
   if (typeof memoryController !== 'undefined') memoryController.sync();
+  chapterUI.render(state);
 });
 
 document.addEventListener('DOMContentLoaded', init);
