@@ -542,15 +542,20 @@
       : []);
     const candidates = Array.isArray(source.memoryCandidates) ? source.memoryCandidates : [];
     const analysis = isRecord(source.memoryAnalysis) ? source.memoryAnalysis : {};
+    function turnKeyIsRetained(key) {
+      if (typeof key !== 'string') return true;
+      const separator = key.includes('::') ? '::' : (key.includes('|') ? '|' : '');
+      if (!separator) return true;
+      const messageIds = key.split(separator).map(cleanString).filter(Boolean);
+      return messageIds.length > 0 && messageIds.every(id => retained.has(id));
+    }
     const analyzedTurnKeys = Array.isArray(analysis.analyzedTurnKeys)
-      ? analysis.analyzedTurnKeys.filter(key => {
-        if (typeof key !== 'string') return true;
-        const separator = key.includes('::') ? '::' : (key.includes('|') ? '|' : '');
-        if (!separator) return true;
-        const messageIds = key.split(separator).map(cleanString).filter(Boolean);
-        return messageIds.length > 0 && messageIds.every(id => retained.has(id));
-      })
+      ? analysis.analyzedTurnKeys.filter(turnKeyIsRetained)
       : [];
+    const lastFailure = isRecord(analysis.lastFailure)
+      && !turnKeyIsRetained(analysis.lastFailure.turnKey)
+      ? null
+      : (analysis.lastFailure === undefined ? null : analysis.lastFailure);
     const traces = isRecord(source.memoryRequestTraces) ? source.memoryRequestTraces : {};
     const retainedTraces = {};
     Object.keys(traces).forEach(messageId => {
@@ -563,9 +568,9 @@
         const sourceIds = candidate && Array.isArray(candidate.sourceMessageIds)
           ? candidate.sourceMessageIds.map(cleanString).filter(Boolean)
           : [];
-        return sourceIds.length === 0 || sourceIds.some(id => retained.has(id));
+        return sourceIds.length === 0 || sourceIds.every(id => retained.has(id));
       }),
-      memoryAnalysis: { ...analysis, analyzedTurnKeys },
+      memoryAnalysis: { ...analysis, analyzedTurnKeys, lastFailure, activeCharacter: null },
       memoryRequestTraces: retainedTraces,
     };
   }
