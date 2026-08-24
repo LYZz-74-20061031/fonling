@@ -79,6 +79,15 @@ textarea{resize:none}
 /* Streaming cursor */
 .bubble.streaming::after{content:"|";;display:inline;animation:blink .8s step-end infinite;color:var(--text);margin-left:1px}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.reasoning-panel{width:min(88%,420px);margin:0 0 7px;padding:8px 10px;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(20,20,20,.72);color:#aaa;box-shadow:var(--shadow-sm);backdrop-filter:blur(8px)}
+.reasoning-panel.active{border-color:rgba(255,214,107,.35)}
+.reasoning-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;color:#c8c8c8;font-size:12px;text-align:left}
+.reasoning-panel.active .reasoning-toggle{color:#f0c96c}
+.reasoning-toggle-icon{font-size:11px;transition:transform .18s ease}
+.reasoning-toggle[aria-expanded="true"] .reasoning-toggle-icon{transform:rotate(180deg)}
+.reasoning-content{margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.08);font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:#999;max-height:220px;overflow:auto}
+.reasoning-content.placeholder{font-style:italic;color:#777}
+.reasoning-preview{margin-bottom:14px}
 
 /* ===== Input Bar ===== */
 #inputBar{display:flex;align-items:flex-end;gap:8px;padding:6px 10px;padding-bottom:calc(6px + var(--safe-b));background:var(--inputbar-bg);border-top:1px solid rgba(255,255,255,.08);flex-shrink:0}
@@ -497,6 +506,8 @@ textarea{resize:none}
 <script src="js/model/model-config.js"></script>
 <script src="js/model/model-gateway.js"></script>
 <script src="js/model/model-session.js"></script>
+<script src="js/model/response-policy.js"></script>
+<script src="js/model/reasoning-ui.js"></script>
 <script src="js/chapter/chapter-model.js"></script>
 <script src="js/chapter/chapter-storage.js"></script>
 <script src="js/chapter/chapter-context.js"></script>
@@ -525,6 +536,26 @@ const LS = {
 };
 
 const modelNamespace = typeof globalThis.FonlingModels === 'object' && globalThis.FonlingModels ? globalThis.FonlingModels : {};
+const responsePolicy = modelNamespace.ResponsePolicy || {
+  forPlan: function() {
+    return {
+      depth: 'ordinary',
+      limits: { recentMessages: RECENT_KEEP, narrativeCharacters: 6000, memoryCharacters: 8000 },
+      instruction: ''
+    };
+  }
+};
+const reasoningUI = modelNamespace.ReasoningUI && typeof modelNamespace.ReasoningUI.createController === 'function'
+  ? modelNamespace.ReasoningUI.createController()
+  : {
+      begin: function() { return null; },
+      update: function() { return null; },
+      complete: function() { return null; },
+      toggle: function() { return null; },
+      remove: function() { return false; },
+      clear: function() {},
+      snapshot: function() { return null; }
+    };
 const modelConfigApi = modelNamespace.Config || {
   createDefaultConfig: function() { return { version: 1, defaultProvider: 'glm', glmApiKey: '', deepseekApiKey: '', costPolicy: { airRequiresExplicitAction: true, freeRetryLimit: 1, automaticTasksUseFreeGlm: true }, connectionTests: { glm: { status: 'untested', checkedAt: '', message: '' }, deepseek: { status: 'untested', checkedAt: '', message: '' } } }; },
   normalizeConfig: function(value) { return Object.assign(this.createDefaultConfig(), value && typeof value === 'object' ? value : {}); },
@@ -1262,6 +1293,72 @@ function applyChapterState(nextChapterState) {
   state.chapters = nextChapterState.chapters;
   state.activeChapterId = nextChapterState.activeChapterId;
 }
+function createReasoningPanel(messageId) {
+  var reasoningState = reasoningUI.snapshot(messageId);
+  if (!reasoningState || (reasoningState.status === 'complete' && !reasoningState.reasoning)) return null;
+  var panel = document.createElement('section');
+  panel.className = 'reasoning-panel ' + reasoningState.status;
+  panel.dataset.reasoningId = messageId;
+  var toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'reasoning-toggle';
+  toggle.setAttribute('aria-expanded', reasoningState.expanded ? 'true' : 'false');
+  var label = document.createElement('span');
+  label.textContent = reasoningState.status === 'active' ? '正在思考……' : '查看思考过程';
+  var icon = document.createElement('span');
+  icon.className = 'reasoning-toggle-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '⌄';
+  toggle.appendChild(label);
+  toggle.appendChild(icon);
+  toggle.addEventListener('click', function(ev) {
+    ev.stopPropagation();
+    reasoningUI.toggle(messageId);
+    refreshReasoningPanel(messageId);
+  });
+  panel.appendChild(toggle);
+  if (reasoningState.expanded) {
+    var content = document.createElement('div');
+    content.className = 'reasoning-content' + (reasoningState.reasoning ? '' : ' placeholder');
+    content.textContent = reasoningState.reasoning || '模型正在梳理剧情与人物关系…';
+    panel.appendChild(content);
+  }
+  return panel;
+}
+function refreshReasoningPanel(messageId) {
+  var matches = Array.from(document.querySelectorAll('[data-reasoning-id]')).filter(function(node) {
+    return node.dataset.reasoningId === messageId;
+  });
+  for (var i = 0; i < matches.length; i++) {
+    var replacement = createReasoningPanel(messageId);
+    if (replacement) matches[i].replaceWith(replacement);
+    else matches[i].remove();
+  }
+}
+function removeRegenerationPreview(messageId) {
+  Array.from(document.querySelectorAll('[data-regeneration-preview]')).forEach(function(node) {
+    if (!messageId || node.dataset.regenerationPreview === messageId) node.remove();
+  });
+}
+function renderRegenerationPreview(message) {
+  if (!message || !message.id) return;
+  removeRegenerationPreview(message.id);
+  var wrap = document.createElement('div');
+  wrap.className = 'msg-wrap assistant reasoning-preview';
+  wrap.dataset.regenerationPreview = message.id;
+  var panel = createReasoningPanel(message.id);
+  if (panel) wrap.appendChild(panel);
+  var bubble = document.createElement('div');
+  bubble.className = 'bubble streaming';
+  bubble.innerHTML = formatMsgText(message.content || '');
+  wrap.appendChild(bubble);
+  chatArea.appendChild(wrap);
+  scrollToBottom();
+}
+function clearTransientReasoning() {
+  reasoningUI.clear();
+  removeRegenerationPreview();
+}
 function renderMessages(scrollToBottom_) {
   if (scrollToBottom_ === undefined) scrollToBottom_ = true;
   if (chapterUI && typeof chapterUI.render === 'function') chapterUI.render(state);
@@ -1290,6 +1387,10 @@ function renderMessages(scrollToBottom_) {
       }
     }
     bubble.innerHTML = formatMsgText(msg.content || '');
+    if (msg.role === 'assistant' && msg.id) {
+      var reasoningPanel = createReasoningPanel(msg.id);
+      if (reasoningPanel) wrap.appendChild(reasoningPanel);
+    }
     wrap.appendChild(bubble);
     if (msg.role === 'assistant' && modelSessionApi.isAirGeneration(msg.generation)) {
       var tierBadge = document.createElement('button');
@@ -1420,6 +1521,8 @@ function finishStreamingBubble() {
 /* ---- Build API Messages ---- */
 function buildApiMessages(options) {
   var config = options || {};
+  var profile = responsePolicy.forPlan(config.plan);
+  var limits = profile.limits;
   var rawMessages = Array.isArray(state.messages) ? state.messages.filter(function(message) {
     return message
       && (message.role === 'user' || message.role === 'assistant')
@@ -1435,20 +1538,24 @@ function buildApiMessages(options) {
       }
     }
   }
+  var recentMessages = rawMessages.slice(-limits.recentMessages);
 
   var selectedMemoryContext = FonlingMemory.Context.buildMemoryContextMessages({
     memories: state.memories,
     currentScene: state.currentScene,
     userText: userText,
-    recentMessages: rawMessages.slice(-RECENT_KEEP)
+    recentMessages: recentMessages,
+    budget: limits.memoryCharacters
   });
   var selectedNarrativeContext = chapterContext.buildNarrativeContext({
     chapters: state.chapters,
     activeChapterId: state.activeChapterId,
-    summary: state.summary,
+    summary: state.summary
+  }, {
     userText: userText,
     currentSceneText: FonlingMemory.Context.formatScene(state.currentScene),
-    recentMessages: rawMessages.slice(-RECENT_KEEP)
+    recentMessages: recentMessages,
+    budget: limits.narrativeCharacters
   });
   var result = [];
   if (state.systemPrompt) result.push({ role: 'system', content: state.systemPrompt });
@@ -1461,9 +1568,10 @@ function buildApiMessages(options) {
   if (state.style) {
     result.push({ role: 'system', content: '回复时请遵循以下风格要求：' + state.style });
   }
+  if (profile.instruction) result.push({ role: 'system', content: profile.instruction });
   selectedMemoryContext.messages.forEach(function(message) { result.push(message); });
   selectedNarrativeContext.messages.forEach(function(message) { result.push(message); });
-  rawMessages.slice(-RECENT_KEEP).forEach(function(message) {
+  recentMessages.forEach(function(message) {
     result.push({ role: message.role, content: message.content });
   });
   return {
@@ -1798,6 +1906,7 @@ async function sendMessage(options) {
     addSystemMsg('请先点击右上角 ⚙️ 配置 ' + (generationPlan.provider === 'glm' ? 'GLM' : 'DeepSeek') + ' API Key');
     return;
   }
+  clearTransientReasoning();
   if (!reusedUserMsg) {
     messageInput.value = '';
     messageInput.style.height = 'auto';
@@ -1821,6 +1930,7 @@ async function sendMessage(options) {
     _streaming: true,
     chapterId: userMsg.chapterId || undefined
   };
+  if (generationPlan.tier === 'air') reasoningUI.begin(assistantMsg.id);
   state.messages = reusedUserMsg
     ? state.messages.concat(assistantMsg)
     : state.messages.concat(userMsg, assistantMsg);
@@ -1828,9 +1938,10 @@ async function sendMessage(options) {
   renderMessages();
   var apiBuild;
   try {
-    apiBuild = buildApiMessages({ userText: finalText });
+    apiBuild = buildApiMessages({ userText: finalText, plan: generationPlan });
   } catch (contextError) {
     if (!conversationRequestIsCurrent(request)) return;
+    reasoningUI.remove(assistantMsg.id);
     applyConversationState(previousConversationState);
     renderMessages();
     addSystemMsg('⚠️ 记忆上下文无法构建：' + (contextError.code || contextError.message || '未知错误'), true);
@@ -1839,6 +1950,7 @@ async function sendMessage(options) {
   }
   var modelOperation = modelSession.beginSend();
   if (!modelOperation) {
+    reasoningUI.remove(assistantMsg.id);
     applyConversationState(previousConversationState);
     renderMessages();
     finishConversationRequest(request);
@@ -1846,14 +1958,19 @@ async function sendMessage(options) {
   }
   generationPlan = createModelRequestPlan('chat', { tier: modelOperation.tier === 'air' ? 'air' : undefined });
   try {
-    const modelResult = await requestModel(generationPlan, apiBuild.messages, function(_delta, content) {
+    const modelResult = await requestModel(generationPlan, apiBuild.messages, function(streamSnapshot) {
       if (!conversationRequestIsCurrent(request)) return;
-      assistantMsg.content = content;
+      if (generationPlan.tier === 'air') {
+        reasoningUI.update(assistantMsg.id, streamSnapshot.reasoning);
+        refreshReasoningPanel(assistantMsg.id);
+      }
+      assistantMsg.content = streamSnapshot.content;
       updateStreamingBubble();
     });
     const fullContent = modelResult.content;
-    if (!conversationRequestIsCurrent(request)) return;
+    if (!conversationRequestIsCurrent(request)) { reasoningUI.remove(assistantMsg.id); return; }
     if (typeof fullContent !== 'string' || !fullContent.trim()) {
+      reasoningUI.remove(assistantMsg.id);
       persistFailedSend(previousConversationState, '❌ 未收到有效回复，请重试', request);
       if (typeof showFailedSendActions === 'function') showFailedSendActions();
       finishConversationRequest(request);
@@ -1862,6 +1979,7 @@ async function sendMessage(options) {
     assistantMsg.content = fullContent;
     assistantMsg.generation = modelSessionApi.createGenerationMetadata(generationPlan, 'send');
     delete assistantMsg._streaming;
+    if (generationPlan.tier === 'air') reasoningUI.complete(assistantMsg.id);
     finishStreamingBubble();
     state.memoryRequestTraces = recordMemoryRequestTrace(
       state.memoryRequestTraces,
@@ -1878,6 +1996,7 @@ async function sendMessage(options) {
     var sendSaveResult;
     try { sendSaveResult = saveCurrentCharacter(); } catch (saveError) { sendSaveResult = { ok: false, rolledBack: false }; }
     if (!sendSaveResult || sendSaveResult.ok !== true) {
+      reasoningUI.remove(assistantMsg.id);
       restoreConversationAfterSaveFailure(previousConversationState, sendSaveResult);
       renderMessages();
       reportSaveFailure(sendSaveResult, {
@@ -1896,6 +2015,7 @@ async function sendMessage(options) {
     }
   } catch (e) {
     if (!conversationRequestIsCurrent(request)) return;
+    reasoningUI.remove(assistantMsg.id);
     persistFailedSend(previousConversationState, '❌ 模型请求失败：' + (e.message || '请检查网络连接'), request);
     if (typeof showFailedSendActions === 'function') showFailedSendActions();
     finishConversationRequest(request, true);
@@ -1942,6 +2062,7 @@ async function regenerateMessage(mode) {
     addSystemMsg('请先点击右上角 ⚙️ 配置 GLM API Key');
     return;
   }
+  clearTransientReasoning();
   if (typeof memoryController !== 'undefined' && typeof memoryController.invalidateAnalysis === 'function') {
     memoryController.invalidateAnalysis(state.currentCharacter);
   }
@@ -1953,7 +2074,7 @@ async function regenerateMessage(mode) {
   applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
   var apiBuild;
   try {
-    apiBuild = buildApiMessages({ userText: regenerateUserText });
+    apiBuild = buildApiMessages({ userText: regenerateUserText, plan: regenerationPlan });
   } catch (contextError) {
     applyConversationState(previousConversationState);
     addSystemMsg('⚠️ 记忆上下文无法构建：' + (contextError.code || contextError.message || '未知错误'), true);
@@ -1975,17 +2096,31 @@ async function regenerateMessage(mode) {
     content: '',
     chapterId: previousConversationState.messages[aiIdx].chapterId || undefined
   };
+  if (useAir) {
+    reasoningUI.begin(astMsg.id);
+    renderRegenerationPreview(astMsg);
+  }
   try {
-    var regenerationResult = await requestModel(regenerationPlan, apiBuild.messages);
+    var regenerationResult = await requestModel(regenerationPlan, apiBuild.messages, function(streamSnapshot) {
+      if (!conversationRequestIsCurrent(request)) return;
+      if (useAir) {
+        reasoningUI.update(astMsg.id, streamSnapshot.reasoning);
+        astMsg.content = streamSnapshot.content;
+        renderRegenerationPreview(astMsg);
+      }
+    });
     var fullContent = regenerationResult.content;
-    if (!conversationRequestIsCurrent(request)) return;
+    if (!conversationRequestIsCurrent(request)) { reasoningUI.remove(astMsg.id); removeRegenerationPreview(astMsg.id); return; }
     if (typeof fullContent !== 'string' || !fullContent.trim()) {
+      reasoningUI.remove(astMsg.id);
+      removeRegenerationPreview(astMsg.id);
       addSystemMsg('❌ ' + regenerationLabel + '失败：未收到有效回复', true);
       finishConversationRequest(request);
       return;
     }
     astMsg.content = fullContent;
     astMsg.generation = modelSessionApi.createGenerationMetadata(regenerationPlan, 'regenerate');
+    if (useAir) reasoningUI.complete(astMsg.id);
     var nextConversationState = conversationStateForMessages(retainedMessages.concat(astMsg), previousConversationState.summary);
     applyConversationState(nextConversationState);
     FonlingMemory.Model.ensureMessageIds(state.messages);
@@ -2005,6 +2140,7 @@ async function regenerateMessage(mode) {
     var regenerateSaveResult;
     try { regenerateSaveResult = saveCurrentCharacter(); } catch (saveError) { regenerateSaveResult = { ok: false, rolledBack: false }; }
     if (!regenerateSaveResult || regenerateSaveResult.ok !== true) {
+      reasoningUI.remove(astMsg.id);
       restoreConversationAfterSaveFailure(previousConversationState, regenerateSaveResult);
       renderMessages();
       reportSaveFailure(regenerateSaveResult, {
@@ -2023,6 +2159,8 @@ async function regenerateMessage(mode) {
     }
   } catch(e) {
     if (!conversationRequestIsCurrent(request)) return;
+    reasoningUI.remove(astMsg.id);
+    removeRegenerationPreview(astMsg.id);
     addSystemMsg('❌ ' + regenerationLabel + '失败：' + (e.message || '请检查网络连接'), true);
     finishConversationRequest(request);
     return;
@@ -2554,6 +2692,7 @@ function loginCharacter(name) {
     return;
   }
   modelSession.reset();
+  clearTransientReasoning();
   hideLoginScreen();
   syncSettingsUI();
   if (typeof memoryController !== 'undefined') memoryController.sync();
@@ -2628,6 +2767,7 @@ function createCharacter(name) {
     return;
   }
   modelSession.reset();
+  clearTransientReasoning();
   hideLoginScreen();
   syncSettingsUI();
   if (typeof memoryController !== 'undefined') memoryController.sync();
@@ -2659,6 +2799,7 @@ function switchCharacter() {
   }
   loadedCharacterSettings = {};
   modelSession.reset();
+  clearTransientReasoning();
   state.currentCharacter = '';
   showLoginScreen();
 }
@@ -2702,6 +2843,7 @@ function deleteCharacter() {
   characterSelectionEpoch += 1;
   invalidateChapterSummaryRequests();
   modelSession.reset();
+  clearTransientReasoning();
   state.currentCharacter = '';
   showLoginScreen();
 }
@@ -3050,6 +3192,7 @@ function backtrackMessage(idx) {
   if (idx < 0 || idx >= state.messages.length) return;
   if (!canBacktrackChapterMessage(state.messages[idx])) return;
   if (!confirm('确认回溯到这条消息？此操作将删除之后的所有对话记录。')) return;
+  clearTransientReasoning();
   var previousConversationState = captureConversationState();
   var retainedMessages = state.messages.slice(0, idx + 1);
   applyConversationState(conversationStateForMessages(retainedMessages, state.summary));
@@ -3203,6 +3346,7 @@ function switchToRole(name) {
         return;
       }
       modelSession.reset();
+      clearTransientReasoning();
       updateBubbleColor();
       renderRoles();
       updateIdentityBar();
@@ -3226,6 +3370,7 @@ function switchToMain() {
     return;
   }
   modelSession.reset();
+  clearTransientReasoning();
   renderRoles();
   renderMessages();
   updateIdentityBar();

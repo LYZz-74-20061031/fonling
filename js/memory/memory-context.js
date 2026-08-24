@@ -117,6 +117,9 @@
 
   function selectMemoriesForContext(input) {
     const source = input && typeof input === 'object' ? input : {};
+    const contextBudget = Number.isFinite(source.budget) && source.budget > 0
+      ? Math.floor(source.budget)
+      : MEMORY_CONTEXT_CHAR_BUDGET;
     const memories = Array.isArray(source.memories) ? source.memories.filter(validMemory) : [];
     const userTokens = tokenize(source.userText);
     const sceneText = formatScene(source.currentScene);
@@ -167,7 +170,7 @@
 
     let requiredMessages = makeMessages(sceneText, pinned, []);
     let usedCharacters = messageCharacters(requiredMessages);
-    if (usedCharacters > MEMORY_CONTEXT_CHAR_BUDGET) {
+    if (usedCharacters > contextBudget) {
       throw createBudgetError('MEMORY_CONTEXT_BUDGET_EXCEEDED', 'Required scene and pinned memories exceed the context budget.');
     }
 
@@ -176,7 +179,7 @@
       const proposed = related.concat(item.memory);
       const proposedMessages = makeMessages(sceneText, pinned, proposed);
       const proposedCharacters = messageCharacters(proposedMessages);
-      if (proposedCharacters <= MEMORY_CONTEXT_CHAR_BUDGET) {
+      if (proposedCharacters <= contextBudget) {
         related.push(item.memory);
         requiredMessages = proposedMessages;
         usedCharacters = proposedCharacters;

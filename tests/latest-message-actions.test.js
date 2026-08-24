@@ -106,6 +106,15 @@ function createRegenerateHarness(options = {}) {
     addSystemMsg() {},
     reportSaveFailure() {},
     updateModelStatusBar() {},
+    clearTransientReasoning() {},
+    renderRegenerationPreview() {},
+    removeRegenerationPreview() {},
+    reasoningUI: {
+      begin() {},
+      update() {},
+      complete() {},
+      remove() {},
+    },
   };
   const persistedSnapshot = JSON.parse(JSON.stringify(sandbox.state));
   sandbox.loadCharacterSnapshotForAnalysis = () => JSON.parse(JSON.stringify(persistedSnapshot));
@@ -259,4 +268,18 @@ test('real gateway keeps free regenerate on GLM when DeepSeek is the global defa
 
   assert.deepEqual([free.provider, free.tier, free.model], ['glm', 'free', 'glm-4.7-flash']);
   assert.deepEqual([air.provider, air.tier, air.model], ['glm', 'air', 'glm-4.5-air']);
+});
+
+test('Air send and regenerate wire transient reasoning without persisting it in messages', () => {
+  const send = extractFunction('sendMessage');
+  const regenerate = extractFunction('regenerateMessage');
+  const save = extractFunction('saveCurrentCharacter');
+  assert.match(html, /js\/model\/reasoning-ui\.js/);
+  assert.match(send, /reasoningUI\.begin/);
+  assert.match(send, /reasoningUI\.update/);
+  assert.match(send, /streamSnapshot\.content/);
+  assert.match(regenerate, /reasoningUI\.begin/);
+  assert.match(regenerate, /reasoningUI\.update/);
+  assert.match(regenerate, /streamSnapshot\.content/);
+  assert.doesNotMatch(save, /reasoning_content|reasoningText|_reasoning/);
 });

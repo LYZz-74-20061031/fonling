@@ -62,7 +62,8 @@
     const maxTokens = task === 'analysis' ? 1400
       : task === 'summary' ? 1024
         : task === 'connection_test' ? 8
-          : 4096;
+          : tier === 'air' ? 4096 : 2560;
+    const thinkingType = task === 'chat' && tier === 'air' ? 'enabled' : 'disabled';
     const temperature = task === 'analysis' ? 0.1
       : task === 'summary' || task === 'connection_test' ? 0.2
         : 0.9;
@@ -76,6 +77,7 @@
       apiKey: isGlm ? config.glmApiKey : config.deepseekApiKey,
       stream,
       maxTokens,
+      thinkingType,
       temperature,
       responseFormat: task === 'analysis' ? Object.freeze({ type: 'json_object' }) : null,
       retryLimit: isGlm && tier === 'free' ? config.costPolicy.freeRetryLimit : 0,
@@ -90,7 +92,9 @@
       max_tokens: plan.maxTokens,
       temperature: plan.temperature,
     };
-    if (plan.provider === Config.PROVIDERS.GLM) body.thinking = { type: 'disabled' };
+    if (plan.provider === Config.PROVIDERS.GLM) {
+      body.thinking = { type: plan.thinkingType === 'enabled' ? 'enabled' : 'disabled' };
+    }
     if (plan.responseFormat) body.response_format = { ...plan.responseFormat };
     return body;
   }
@@ -139,16 +143,18 @@
 
   function parseSseLine(line) {
     const trimmed = line.trim();
-    if (!trimmed.startsWith('data:')) return '';
+    if (!trimmed.startsWith('data:')) return { reasoningDelta: '', contentDelta: '' };
     const data = trimmed.slice(5).trim();
-    if (!data || data === '[DONE]') return '';
+    if (!data || data === '[DONE]') return { reasoningDelta: '', contentDelta: '' };
     try {
       const payload = JSON.parse(data);
-      const content = payload && payload.choices && payload.choices[0]
-        && payload.choices[0].delta && payload.choices[0].delta.content;
-      return typeof content === 'string' ? content : '';
+      const delta = payload && payload.choices && payload.choices[0] && payload.choices[0].delta;
+      return {
+        reasoningDelta: delta && typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '',
+        contentDelta: delta && typeof delta.content === 'string' ? delta.content : '',
+      };
     } catch (_) {
-      return '';
+      return { reasoningDelta: '', contentDelta: '' };
     }
   }
 
@@ -160,12 +166,21 @@
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
     let content = '';
+    let reasoning = '';
 
     function consume(line) {
-      const delta = parseSseLine(line);
-      if (!delta) return;
-      content += delta;
-      if (typeof onDelta === 'function') onDelta(delta, content);
+      const parsed = parseSseLine(line);
+      if (!parsed.reasoningDelta && !parsed.contentDelta) return;
+      reasoning += parsed.reasoningDelta;
+      content += parsed.contentDelta;
+      if (typeof onDelta === 'function') {
+        onDelta({
+          reasoningDelta: parsed.reasoningDelta,
+          contentDelta: parsed.contentDelta,
+          reasoning,
+          content,
+        });
+      }
     }
 
     while (true) {
